@@ -44,7 +44,10 @@ export async function PUT(
     const updateData: Record<string, unknown> = {}
     if (nodes !== undefined) updateData.nodes = nodes
     if (edges !== undefined) updateData.edges = edges
-    if (name) updateData.name = name
+    if (name !== undefined) {
+      const safeName = String(name).trim()
+      updateData.name = safeName || '未命名电网'
+    }
     if (description !== undefined) updateData.description = description
 
     const grid = await prisma.powerGrid.update({

@@ -16,12 +16,49 @@ import ReactFlow, {
   MarkerType,
   ConnectionMode,
   SelectionMode,
-  updateEdge,
   BaseEdge,
   EdgeProps,
-  getSmoothStepPath,
+  EdgeLabelRenderer,
+  Position,
+  useReactFlow,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
+
+interface EdgeControlData {
+  controlOffsetX?: number
+  controlOffsetY?: number // legacy
+  sourceOffsetY?: number
+  targetOffsetY?: number
+  isActive?: boolean
+}
+
+type Point = { x: number; y: number }
+const EDGE_STUB_LENGTH = 20
+const EDGE_OFFSET_SNAP = 2
+const EDGE_EPSILON = 1
+const EDGE_ALIGN_TOLERANCE = 4
+const EDGE_SHORT_SEGMENT_MIN = 8
+
+const getHandleDirection = (position: Position): Point => {
+  if (position === Position.Left) return { x: -1, y: 0 }
+  if (position === Position.Right) return { x: 1, y: 0 }
+  if (position === Position.Top) return { x: 0, y: -1 }
+  return { x: 0, y: 1 }
+}
+
+const toPath = (points: Point[]) => {
+  const rounded = points.map((point) => ({
+    x: Math.round(point.x),
+    y: Math.round(point.y),
+  }))
+
+  const normalized = rounded.filter((point, index, arr) => {
+    if (index === 0) return true
+    const prev = arr[index - 1]
+    return Math.abs(prev.x - point.x) > EDGE_EPSILON || Math.abs(prev.y - point.y) > EDGE_EPSILON
+  })
+  return normalized.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ')
+}
 
 // Custom edge component
 function UpdatableEdge({
@@ -30,31 +67,184 @@ function UpdatableEdge({
   sourceY,
   targetX,
   targetY,
-  sourcePosition,
-  targetPosition,
+  sourcePosition = Position.Bottom,
+  targetPosition = Position.Top,
   style = {},
   markerEnd,
   selected,
+  data,
 }: EdgeProps) {
-  const [edgePath] = getSmoothStepPath({
-    sourceX,
-    sourceY,
-    sourcePosition,
-    targetX,
-    targetY,
-    targetPosition,
-  })
+  const { screenToFlowPosition, setEdges } = useReactFlow()
+  const controlData = (data as EdgeControlData | undefined) ?? {}
+  const controlOffsetX = controlData.controlOffsetX ?? 0
+  const legacyOffsetY = controlData.controlOffsetY ?? 0
+  const sourceOffsetY = controlData.sourceOffsetY ?? legacyOffsetY
+  const targetOffsetY = controlData.targetOffsetY ?? legacyOffsetY
+  const isActive = Boolean(controlData.isActive)
+  const sourceDir = getHandleDirection(sourcePosition)
+  const targetDir = getHandleDirection(targetPosition)
+  const sourceIsVertical = sourceDir.x === 0
+  const targetIsVertical = targetDir.x === 0
+  const isAlignedVertical = Math.abs(sourceX - targetX) <= EDGE_ALIGN_TOLERANCE
+  const isAlignedHorizontal = Math.abs(sourceY - targetY) <= EDGE_ALIGN_TOLERANCE
+  const hasOffsets = Math.abs(controlOffsetX) > EDGE_EPSILON || Math.abs(sourceOffsetY) > EDGE_EPSILON || Math.abs(targetOffsetY) > EDGE_EPSILON
+  const sourceStub: Point = sourceIsVertical
+    ? { x: sourceX, y: sourceY + sourceDir.y * EDGE_STUB_LENGTH }
+    : { x: sourceX + sourceDir.x * EDGE_STUB_LENGTH, y: sourceY }
+  const targetStub: Point = targetIsVertical
+    ? { x: targetX, y: targetY + targetDir.y * EDGE_STUB_LENGTH }
+    : { x: targetX + targetDir.x * EDGE_STUB_LENGTH, y: targetY }
+  const defaultMidX = (sourceStub.x + targetStub.x) / 2
+  const defaultSourceLaneY = sourceStub.y
+  const defaultTargetLaneY = targetStub.y
+  let midX = defaultMidX + controlOffsetX
+  let sourceLaneY = defaultSourceLaneY + sourceOffsetY
+  let targetLaneY = defaultTargetLaneY + targetOffsetY
+
+  // Avoid tiny jogs: if a segment is too short, snap the elbow onto the adjacent segment.
+  if (Math.abs(midX - sourceStub.x) < EDGE_SHORT_SEGMENT_MIN) midX = sourceStub.x
+  if (Math.abs(targetStub.x - midX) < EDGE_SHORT_SEGMENT_MIN) midX = targetStub.x
+  if (Math.abs(sourceLaneY - sourceStub.y) < EDGE_SHORT_SEGMENT_MIN) sourceLaneY = sourceStub.y
+  if (Math.abs(targetLaneY - targetStub.y) < EDGE_SHORT_SEGMENT_MIN) targetLaneY = targetStub.y
+  if (Math.abs(targetLaneY - sourceLaneY) < EDGE_SHORT_SEGMENT_MIN) {
+    const avgY = Math.round((sourceLaneY + targetLaneY) / 2)
+    sourceLaneY = avgY
+    targetLaneY = avgY
+  }
+  const edgePath = (isAlignedVertical || isAlignedHorizontal) && !hasOffsets
+    ? toPath([
+        { x: sourceX, y: sourceY },
+        { x: targetX, y: targetY },
+      ])
+    : toPath([
+        { x: sourceX, y: sourceY },
+        sourceStub,
+        { x: sourceStub.x, y: sourceLaneY },
+        { x: midX, y: sourceLaneY },
+        { x: midX, y: targetLaneY },
+        { x: targetStub.x, y: targetLaneY },
+        { x: targetStub.x, y: targetStub.y },
+        { x: targetX, y: targetY },
+      ])
+
+  const handleSegmentPointerDown = (axis: 'x' | 'source-y' | 'target-y') => (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const startFlowPoint = screenToFlowPosition({ x: event.clientX, y: event.clientY })
+    const startOffsetX = controlOffsetX
+    const startSourceOffsetY = sourceOffsetY
+    const startTargetOffsetY = targetOffsetY
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      const currentFlowPoint = screenToFlowPosition({ x: moveEvent.clientX, y: moveEvent.clientY })
+      const deltaX = currentFlowPoint.x - startFlowPoint.x
+      const deltaY = currentFlowPoint.y - startFlowPoint.y
+
+      setEdges((eds) =>
+        eds.map((edge) => {
+          if (edge.id !== id) return edge
+          const edgeData = (edge.data as EdgeControlData | undefined) ?? {}
+          const nextOffsetXRaw = axis === 'x' ? startOffsetX + deltaX : startOffsetX
+          const nextSourceOffsetYRaw = axis === 'source-y' ? startSourceOffsetY + deltaY : startSourceOffsetY
+          const nextTargetOffsetYRaw = axis === 'target-y' ? startTargetOffsetY + deltaY : startTargetOffsetY
+          const nextOffsetX =
+            Math.abs(nextOffsetXRaw) < EDGE_EPSILON
+              ? 0
+              : Math.round(nextOffsetXRaw / EDGE_OFFSET_SNAP) * EDGE_OFFSET_SNAP
+          const nextSourceOffsetY =
+            Math.abs(nextSourceOffsetYRaw) < EDGE_EPSILON
+              ? 0
+              : Math.round(nextSourceOffsetYRaw / EDGE_OFFSET_SNAP) * EDGE_OFFSET_SNAP
+          const nextTargetOffsetY =
+            Math.abs(nextTargetOffsetYRaw) < EDGE_EPSILON
+              ? 0
+              : Math.round(nextTargetOffsetYRaw / EDGE_OFFSET_SNAP) * EDGE_OFFSET_SNAP
+          return {
+            ...edge,
+            data: {
+              ...edgeData,
+              controlOffsetX: nextOffsetX,
+              sourceOffsetY: nextSourceOffsetY,
+              targetOffsetY: nextTargetOffsetY,
+            },
+          }
+        })
+      )
+    }
+
+    const onPointerUp = () => {
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', onPointerUp)
+    }
+
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', onPointerUp)
+  }
 
   return (
-    <BaseEdge
-      path={edgePath}
-      markerEnd={markerEnd}
-      style={{
-        ...style,
-        strokeWidth: selected ? 3 : 2,
-        stroke: selected ? '#3b82f6' : '#64748b',
-      }}
-    />
+    <>
+      <BaseEdge
+        path={edgePath}
+        markerEnd={markerEnd}
+        style={{
+          ...style,
+          strokeWidth: selected ? 3 : 2,
+          stroke: selected ? '#3b82f6' : '#64748b',
+        }}
+      />
+      {(selected || isActive) && (
+        <EdgeLabelRenderer>
+          <>
+            <div
+              className="absolute nodrag nopan"
+              style={{
+                left: `${midX - 8}px`,
+                top: `${Math.min(sourceLaneY, targetLaneY)}px`,
+                width: '16px',
+                height: `${Math.max(Math.abs(targetLaneY - sourceLaneY), 24)}px`,
+                transform: `${Math.abs(targetLaneY - sourceLaneY) < 24 ? `translateY(${(Math.abs(targetLaneY - sourceLaneY) - 24) / 2}px)` : ''}`,
+                cursor: 'ew-resize',
+                pointerEvents: 'all',
+                zIndex: 20,
+              }}
+              title="拖拽垂直段（左右移动）"
+              onPointerDown={handleSegmentPointerDown('x')}
+            />
+            <div
+              className="absolute nodrag nopan"
+              style={{
+                left: `${Math.min(sourceStub.x, midX)}px`,
+                top: `${sourceLaneY - 8}px`,
+                width: `${Math.max(Math.abs(midX - sourceStub.x), 24)}px`,
+                height: '16px',
+                transform: `${Math.abs(midX - sourceStub.x) < 24 ? `translateX(${(Math.abs(midX - sourceStub.x) - 24) / 2}px)` : ''}`,
+                cursor: 'ns-resize',
+                pointerEvents: 'all',
+                zIndex: 20,
+              }}
+              title="拖拽上游水平段（上下移动）"
+              onPointerDown={handleSegmentPointerDown('source-y')}
+            />
+            <div
+              className="absolute nodrag nopan"
+              style={{
+                left: `${Math.min(midX, targetStub.x)}px`,
+                top: `${targetLaneY - 8}px`,
+                width: `${Math.max(Math.abs(targetStub.x - midX), 24)}px`,
+                height: '16px',
+                transform: `${Math.abs(targetStub.x - midX) < 24 ? `translateX(${(Math.abs(targetStub.x - midX) - 24) / 2}px)` : ''}`,
+                cursor: 'ns-resize',
+                pointerEvents: 'all',
+                zIndex: 20,
+              }}
+              title="拖拽下游水平段（上下移动）"
+              onPointerDown={handleSegmentPointerDown('target-y')}
+            />
+          </>
+        </EdgeLabelRenderer>
+      )}
+    </>
   )
 }
 import { PowerSourceNode } from '@/components/nodes/PowerSourceNode'
@@ -88,6 +278,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const [grid, setGrid] = useState<GridData | null>(null)
+  const [gridName, setGridName] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
@@ -111,14 +302,69 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
   )
 
   const [selectedEdge, setSelectedEdge] = useState<Edge | null>(null)
+  const selectedEdgeData = ((selectedEdge?.data as EdgeControlData | undefined) ?? {})
+
+  const updateSelectedEdgeData = useCallback(
+    (updates: Partial<EdgeControlData>) => {
+      if (!selectedEdge) return
+      setEdges((eds) =>
+        eds.map((edge) =>
+          edge.id === selectedEdge.id
+            ? {
+                ...edge,
+                data: {
+                  ...((edge.data as EdgeControlData | undefined) ?? {}),
+                  ...updates,
+                },
+              }
+            : edge
+        )
+      )
+    },
+    [selectedEdge, setEdges]
+  )
+
+  const resetSelectedEdgeControlPoint = useCallback(() => {
+    updateSelectedEdgeData({ controlOffsetX: 0, sourceOffsetY: 0, targetOffsetY: 0, controlOffsetY: 0 })
+  }, [updateSelectedEdgeData])
+
+  const moveSelectedEdgeControlPoint = useCallback(
+    (deltaX: number, deltaY: number) => {
+      if (!selectedEdge) return
+      updateSelectedEdgeData({
+        controlOffsetX: (selectedEdgeData.controlOffsetX ?? 0) + deltaX,
+        sourceOffsetY: (selectedEdgeData.sourceOffsetY ?? selectedEdgeData.controlOffsetY ?? 0) + deltaY,
+        targetOffsetY: (selectedEdgeData.targetOffsetY ?? selectedEdgeData.controlOffsetY ?? 0) + deltaY,
+      })
+    },
+    [selectedEdge, selectedEdgeData.controlOffsetX, selectedEdgeData.controlOffsetY, selectedEdgeData.sourceOffsetY, selectedEdgeData.targetOffsetY, updateSelectedEdgeData]
+  )
 
   const onEdgeClick = useCallback((event: React.MouseEvent, edge: Edge) => {
+    setEdges((eds) =>
+      eds.map((currentEdge) => ({
+        ...currentEdge,
+        data: {
+          ...((currentEdge.data as EdgeControlData | undefined) ?? {}),
+          isActive: currentEdge.id === edge.id,
+        },
+      }))
+    )
     setSelectedEdge(edge)
-  }, [])
+  }, [setEdges])
 
   const onPaneClick = useCallback(() => {
+    setEdges((eds) =>
+      eds.map((edge) => ({
+        ...edge,
+        data: {
+          ...((edge.data as EdgeControlData | undefined) ?? {}),
+          isActive: false,
+        },
+      }))
+    )
     setSelectedEdge(null)
-  }, [])
+  }, [setEdges])
 
 
 
@@ -134,11 +380,18 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
     fetchGrid()
   }, [params.id])
 
+  useEffect(() => {
+    if (!selectedEdge) return
+    const latestEdge = edges.find((edge) => edge.id === selectedEdge.id) ?? null
+    setSelectedEdge(latestEdge)
+  }, [edges, selectedEdge])
+
   const fetchGrid = async () => {
     try {
       const res = await fetch(`/api/grids/${params.id}`)
       const data = await res.json()
       setGrid(data)
+      setGridName(data.name || '')
       
       console.log('Fetched grid data:', {
         id: data.id,
@@ -165,7 +418,28 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
       
       try {
         const edgesData = typeof data.edges === 'string' ? JSON.parse(data.edges) : data.edges
-        parsedEdges = Array.isArray(edgesData) ? edgesData : []
+        parsedEdges = Array.isArray(edgesData)
+          ? edgesData.map((edge) => {
+              const edgeData = ((edge?.data as EdgeControlData | undefined) ?? {})
+              const cleanOffsetX = Math.abs(edgeData.controlOffsetX ?? 0) < EDGE_SHORT_SEGMENT_MIN ? 0 : Math.round(edgeData.controlOffsetX ?? 0)
+              const legacyOffsetY = edgeData.controlOffsetY ?? 0
+              const rawSourceOffsetY = edgeData.sourceOffsetY ?? legacyOffsetY
+              const rawTargetOffsetY = edgeData.targetOffsetY ?? legacyOffsetY
+              const cleanSourceOffsetY = Math.abs(rawSourceOffsetY) < EDGE_SHORT_SEGMENT_MIN ? 0 : Math.round(rawSourceOffsetY)
+              const cleanTargetOffsetY = Math.abs(rawTargetOffsetY) < EDGE_SHORT_SEGMENT_MIN ? 0 : Math.round(rawTargetOffsetY)
+              return {
+                ...edge,
+                data: {
+                  ...edgeData,
+                  controlOffsetX: cleanOffsetX,
+                  sourceOffsetY: cleanSourceOffsetY,
+                  targetOffsetY: cleanTargetOffsetY,
+                  controlOffsetY: 0,
+                  isActive: false,
+                },
+              }
+            })
+          : []
         console.log('Parsed edges:', parsedEdges.length)
       } catch (e) {
         console.error('Failed to parse edges:', e)
@@ -190,6 +464,13 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
         markerEnd: { type: MarkerType.ArrowClosed },
         style: { strokeWidth: 2, stroke: '#64748b' },
         animated: false,
+        data: {
+          controlOffsetX: 0,
+          sourceOffsetY: 0,
+          targetOffsetY: 0,
+          controlOffsetY: 0,
+          isActive: false,
+        } as EdgeControlData,
       }
       setEdges((eds) => addEdge(edge, eds))
     },
@@ -276,6 +557,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
         type: edge.type,
         markerEnd: edge.markerEnd,
         style: edge.style,
+        data: edge.data,
       }))
 
       console.log('Saving nodes:', cleanNodes.length)
@@ -287,6 +569,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
         body: JSON.stringify({
           nodes: JSON.stringify(cleanNodes),
           edges: JSON.stringify(cleanEdges),
+          name: gridName.trim() || '未命名电网',
         }),
       })
 
@@ -397,6 +680,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
     )
   }, [nodes, setNodes])
 
+
   /** 置于顶层 */
   const bringToFront = useCallback(() => {
     const maxZ = Math.max(0, ...nodes.map(n => (n.style?.zIndex as number) || 0))
@@ -486,7 +770,13 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
               <span>返回</span>
             </button>
             <div className="h-6 w-px bg-gray-300"></div>
-            <h1 className="text-xl font-bold text-gray-900">{grid?.name}</h1>
+            <input
+              type="text"
+              value={gridName}
+              onChange={(event) => setGridName(event.target.value)}
+              className="px-3 py-1.5 border border-gray-300 rounded-lg text-base font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none w-72"
+              placeholder="请输入电网名称"
+            />
             <span className="px-3 py-1 bg-blue-100 text-blue-700 text-sm font-medium rounded-full">
               编辑模式
             </span>
@@ -823,6 +1113,13 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
               animated: false,
               style: { strokeWidth: 2, stroke: '#64748b' },
               markerEnd: { type: MarkerType.ArrowClosed },
+              data: {
+                controlOffsetX: 0,
+                sourceOffsetY: 0,
+                targetOffsetY: 0,
+                controlOffsetY: 0,
+                isActive: false,
+              } as EdgeControlData,
             }}
             fitView
             snapToGrid={true}
@@ -982,6 +1279,94 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
               </div>
 
               <p className="mt-4 text-xs text-gray-400">点击画布空白处取消选择</p>
+            </div>
+          </div>
+        )}
+
+        {/* 右侧连线面板：选中单条连线时显示 */}
+        {!selectedNode && selectedEdge && (
+          <div className="w-72 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0">
+            <div className="p-4">
+              <h2 className="text-sm font-bold text-gray-800 mb-4">连线设置</h2>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1.5">段落调节说明</label>
+                  <div className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 bg-gray-50">
+                    直接拖线段：垂直段左右移、水平段上下移（连接点前后 20px 固定）
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1.5">X偏移</label>
+                    <input
+                      type="number"
+                      value={Math.round(selectedEdgeData.controlOffsetX ?? 0)}
+                      onChange={(event) =>
+                        updateSelectedEdgeData({ controlOffsetX: Number(event.target.value) || 0 })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1.5">上横Y偏移</label>
+                    <input
+                      type="number"
+                      value={Math.round(selectedEdgeData.sourceOffsetY ?? selectedEdgeData.controlOffsetY ?? 0)}
+                      onChange={(event) =>
+                        updateSelectedEdgeData({ sourceOffsetY: Number(event.target.value) || 0 })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1.5">下横Y偏移</label>
+                  <input
+                    type="number"
+                    value={Math.round(selectedEdgeData.targetOffsetY ?? selectedEdgeData.controlOffsetY ?? 0)}
+                    onChange={(event) =>
+                      updateSelectedEdgeData({ targetOffsetY: Number(event.target.value) || 0 })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1.5">快速移动（10px）</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => moveSelectedEdgeControlPoint(-10, 0)}
+                      className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+                    >
+                      左移
+                    </button>
+                    <button
+                      onClick={() => moveSelectedEdgeControlPoint(10, 0)}
+                      className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+                    >
+                      右移
+                    </button>
+                    <button
+                      onClick={() => moveSelectedEdgeControlPoint(0, -10)}
+                      className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+                    >
+                      上移
+                    </button>
+                    <button
+                      onClick={() => moveSelectedEdgeControlPoint(0, 10)}
+                      className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+                    >
+                      下移
+                    </button>
+                  </div>
+                </div>
+                <button
+                  onClick={resetSelectedEdgeControlPoint}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+                >
+                  重置编辑点
+                </button>
+                <p className="text-xs text-gray-500">箭头方向跟随末端固定段，保持稳定不乱跳。</p>
+              </div>
             </div>
           </div>
         )}
