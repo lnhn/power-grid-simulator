@@ -1,0 +1,63 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  username  String   @unique
+  password  String
+  role      String   @default("OPERATOR")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  logs      OperationLog[]
+}
+
+model PowerGrid {
+  id          String     @id @default(cuid())
+  name        String
+  description String?
+  nodes       String     // JSON string of nodes
+  edges       String     // JSON string of edges
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  logs        OperationLog[]
+  equipment   Equipment[] // 设备清单：保存电网时自动从节点同步
+}
+
+model OperationLog {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  gridId      String
+  grid        PowerGrid @relation(fields: [gridId], references: [id])
+  action      String    // 操作类型，如 "SWITCH_ON", "SWITCH_OFF"
+  targetId    String    // 被操作的元件ID
+  timestamp   DateTime  @default(now())
+  details     String?   // 额外的操作详情
+}
+
+// 设备清单：由电网保存时自动从画布节点同步，与电网一致，便于导出
+model Equipment {
+  id          String    @id @default(cuid())
+  gridId      String
+  grid        PowerGrid @relation(fields: [gridId], references: [id], onDelete: Cascade)
+  nodeId      String    // 画布节点 ID，与电网 nodes 一致
+  name        String    // 设备名称/标签
+  type        String    // powerSource | switch | load | bus
+  subType     String?   // 负载子类型: pump | fan | compressor | mixer | conveyor | heater
+  power       Float?    // 功率 kW
+  voltage     Float?    // 电压 V
+  current     Float?    // 电流 A
+  description String?
+  specs       String?   // JSON 扩展属性
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
