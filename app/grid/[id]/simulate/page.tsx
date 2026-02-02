@@ -144,8 +144,9 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
       console.log('Fetching logs for grid:', params.id)
       const res = await fetch(`/api/logs?gridId=${params.id}`)
       const data = await res.json()
-      console.log('Fetched logs:', data.length, 'entries')
-      setLogs(data)
+      const normalizedLogs = Array.isArray(data) ? data : []
+      console.log('Fetched logs:', normalizedLogs.length, 'entries')
+      setLogs(normalizedLogs)
     } catch (error) {
       console.error('Failed to fetch logs:', error)
     }

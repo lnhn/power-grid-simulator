@@ -15,8 +15,48 @@ import ReactFlow, {
   Node,
   MarkerType,
   ConnectionMode,
+  SelectionMode,
+  updateEdge,
+  BaseEdge,
+  EdgeProps,
+  getSmoothStepPath,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
+
+// Custom edge component
+function UpdatableEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  style = {},
+  markerEnd,
+  selected,
+}: EdgeProps) {
+  const [edgePath] = getSmoothStepPath({
+    sourceX,
+    sourceY,
+    sourcePosition,
+    targetX,
+    targetY,
+    targetPosition,
+  })
+
+  return (
+    <BaseEdge
+      path={edgePath}
+      markerEnd={markerEnd}
+      style={{
+        ...style,
+        strokeWidth: selected ? 3 : 2,
+        stroke: selected ? '#3b82f6' : '#64748b',
+      }}
+    />
+  )
+}
 import { PowerSourceNode } from '@/components/nodes/PowerSourceNode'
 import { SwitchNode } from '@/components/nodes/SwitchNode'
 import { LoadNode } from '@/components/nodes/LoadNode'
@@ -28,6 +68,10 @@ const nodeTypes = {
   switch: SwitchNode,
   load: LoadNode,
   bus: BusNode,
+}
+
+const edgeTypes = {
+  smoothstep: UpdatableEdge,
 }
 
 interface GridData {
@@ -65,6 +109,18 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
     },
     [selectedNode, setNodes]
   )
+
+  const [selectedEdge, setSelectedEdge] = useState<Edge | null>(null)
+
+  const onEdgeClick = useCallback((event: React.MouseEvent, edge: Edge) => {
+    setSelectedEdge(edge)
+  }, [])
+
+  const onPaneClick = useCallback(() => {
+    setSelectedEdge(null)
+  }, [])
+
+
 
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -743,6 +799,8 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                   • 其他：对齐到网格、置于顶层/底层
                 </p>
               </div>
+              
+
             </div>
           </div>
         </div>
@@ -755,7 +813,10 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            onEdgeClick={onEdgeClick}
+            onPaneClick={onPaneClick}
             nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
             connectionMode={ConnectionMode.Loose}
             defaultEdgeOptions={{
               type: 'smoothstep',
@@ -775,7 +836,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
             panOnDrag={[1, 2]} // 中键和右键拖动画布
             selectionOnDrag={true}
             // 启用框选
-            selectionMode="partial"
+            selectionMode={SelectionMode.Partial}
             className="bg-gray-50"
           >
             <Background color="#e5e7eb" gap={16} />

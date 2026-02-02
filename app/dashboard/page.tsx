@@ -12,6 +12,8 @@ interface PowerGrid {
   updatedAt: string
 }
 
+
+
 export default function DashboardPage() {
   const { data: session, status } = useSession()
   const router = useRouter()
@@ -33,13 +35,15 @@ export default function DashboardPage() {
     try {
       const res = await fetch('/api/grids')
       const data = await res.json()
-      setGrids(data)
+      setGrids(Array.isArray(data) ? data : [])
     } catch (error) {
       console.error('Failed to fetch grids:', error)
     } finally {
       setLoading(false)
     }
   }
+
+
 
   const handleLogout = async () => {
     router.push('/api/auth/signout')
@@ -93,6 +97,15 @@ export default function DashboardPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
             </svg>
             <span>设备清单</span>
+          </Link>
+          <Link
+            href="/logs"
+            className="flex items-center space-x-3 px-3 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition"
+          >
+            <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>操作记录</span>
           </Link>
         </nav>
         <div className="p-3 border-t border-gray-100 space-y-2">
@@ -151,18 +164,18 @@ export default function DashboardPage() {
             {grids.map((grid) => (
               <div
                 key={grid.id}
-                className="bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-lg transition overflow-hidden"
+                className="bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-lg transition overflow-hidden flex flex-col h-full"
               >
-                <div className="p-6">
+                <div className="p-6 flex-1 flex flex-col">
                   <h3 className="text-lg font-semibold text-gray-900 mb-2">{grid.name}</h3>
-                  <p className="text-sm text-gray-600 mb-4 line-clamp-2">
+                  <p className="text-sm text-gray-600 mb-4 line-clamp-2 flex-1 min-h-[40px]">
                     {grid.description || '暂无描述'}
                   </p>
                   <p className="text-xs text-gray-400 mb-4">
                     更新于 {new Date(grid.updatedAt).toLocaleString('zh-CN')}
                   </p>
                   
-                  <div className="flex space-x-2">
+                  <div className="flex space-x-2 mt-auto">
                     <Link
                       href={`/grid/${grid.id}/simulate`}
                       className="flex-1 px-4 py-2 bg-blue-500 text-white text-sm font-medium rounded-lg hover:bg-blue-600 transition text-center"

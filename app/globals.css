@@ -35,6 +35,21 @@ body {
   stroke-width: 2;
 }
 
+/* Edge update styles */
+.react-flow__edgeupdater {
+  cursor: pointer;
+  pointer-events: all;
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: #3b82f6;
+  stroke-width: 3;
+}
+
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: #3b82f6;
+}
+
 /* 动画效果 */
 @keyframes pulse-electricity {
   0%, 100% {

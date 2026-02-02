@@ -98,9 +98,14 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    await prisma.powerGrid.delete({
-      where: { id: params.id },
-    })
+    await prisma.$transaction([
+      prisma.operationLog.deleteMany({
+        where: { gridId: params.id },
+      }),
+      prisma.powerGrid.delete({
+        where: { id: params.id },
+      }),
+    ])
 
     return NextResponse.json({ success: true })
   } catch (error) {

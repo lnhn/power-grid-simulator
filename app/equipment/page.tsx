@@ -119,6 +119,15 @@ export default function EquipmentPage() {
             </svg>
             <span>设备清单</span>
           </span>
+          <Link
+            href="/logs"
+            className="flex items-center space-x-3 px-3 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition"
+          >
+            <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>操作记录</span>
+          </Link>
         </nav>
         <div className="p-3 border-t border-gray-100 space-y-2">
           <div className="px-3 py-2 text-sm text-gray-700">
@@ -158,11 +167,11 @@ export default function EquipmentPage() {
                   {grids.map((g) => (
                     <div
                       key={g.id}
-                      className="bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-lg transition overflow-hidden"
+                      className="bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-lg transition overflow-hidden flex flex-col h-full"
                     >
-                      <div className="p-6">
+                      <div className="p-6 flex-1 flex flex-col">
                         <h3 className="text-lg font-semibold text-gray-900 mb-2">{g.name}</h3>
-                        <p className="text-sm text-gray-600 mb-4 line-clamp-2">
+                        <p className="text-sm text-gray-600 mb-4 line-clamp-2 flex-1 min-h-[40px]">
                           {g.description || '暂无描述'}
                         </p>
                         <p className="text-xs text-gray-400 mb-4">
@@ -170,7 +179,7 @@ export default function EquipmentPage() {
                         </p>
                         <button
                           onClick={() => openGrid(g.id)}
-                          className="w-full px-4 py-2 bg-blue-500 text-white text-sm font-medium rounded-lg hover:bg-blue-600 transition"
+                          className="w-full px-4 py-2 bg-blue-500 text-white text-sm font-medium rounded-lg hover:bg-blue-600 transition mt-auto"
                         >
                           查看设备清单 / 导出
                         </button>
