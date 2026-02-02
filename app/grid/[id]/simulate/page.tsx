@@ -68,6 +68,11 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
   nodesRef.current = nodes
   edgesRef.current = edges
 
+  const inferTieHandle = useCallback((tieNode: Node | undefined, otherNode: Node | undefined, kind: 'source' | 'target') => {
+    if (!tieNode || !otherNode) return undefined
+    return otherNode.position.x < tieNode.position.x ? `left-${kind}` : `right-${kind}`
+  }, [])
+
   useEffect(() => {
     if (status === 'unauthenticated') {
       router.push('/login')
@@ -93,8 +98,8 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
       const data = await res.json()
       setGrid(data)
       
-      let parsedNodes = []
-      let parsedEdges = []
+      let parsedNodes: Node[] = []
+      let parsedEdges: Edge[] = []
       
       try {
         const nodesData = typeof data.nodes === 'string' ? JSON.parse(data.nodes) : data.nodes
@@ -106,7 +111,25 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
       
       try {
         const edgesData = typeof data.edges === 'string' ? JSON.parse(data.edges) : data.edges
-        parsedEdges = Array.isArray(edgesData) ? edgesData : []
+        parsedEdges = Array.isArray(edgesData)
+          ? edgesData.map((edge: Edge) => {
+              const sourceNode = parsedNodes.find((n: Node) => n.id === edge.source)
+              const targetNode = parsedNodes.find((n: Node) => n.id === edge.target)
+              const sourceIsTie = sourceNode?.type === 'switch' && sourceNode?.data?.subType === 'tie'
+              const targetIsTie = targetNode?.type === 'switch' && targetNode?.data?.subType === 'tie'
+              const inferredSourceHandle = sourceIsTie
+                ? inferTieHandle(sourceNode, targetNode, 'source')
+                : edge.sourceHandle
+              const inferredTargetHandle = targetIsTie
+                ? inferTieHandle(targetNode, sourceNode, 'target')
+                : edge.targetHandle
+              return {
+                ...edge,
+                sourceHandle: inferredSourceHandle,
+                targetHandle: inferredTargetHandle,
+              }
+            })
+          : []
       } catch (e) {
         console.error('Failed to parse edges:', e)
         parsedEdges = []
@@ -289,6 +312,25 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
     const powerSources = currentNodes.filter(n => n.type === 'powerSource')
     powerSources.forEach(ps => powered.add(ps.id))
     
+    const isSwitchNode = (node?: Node) => node?.type === 'switch'
+    const isSwitchOn = (node?: Node) => !isSwitchNode(node) || node?.data?.status === 'on'
+    const isPassThrough = (node?: Node) => {
+      if (!node) return false
+      if (node.type === 'load') return false
+      if (node.type === 'switch') return node.data?.status === 'on'
+      return true
+    }
+
+    const adjacency = new Map<string, Set<string>>()
+    const addNeighbor = (a: string, b: string) => {
+      if (!adjacency.has(a)) adjacency.set(a, new Set())
+      adjacency.get(a)?.add(b)
+    }
+    currentEdges.forEach((edge) => {
+      addNeighbor(edge.source, edge.target)
+      addNeighbor(edge.target, edge.source)
+    })
+
     // 广度优先搜索传递电力
     let changed = true
     let iterations = 0
@@ -296,26 +338,23 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
       changed = false
       iterations++
       
-      currentEdges.forEach(edge => {
-        const sourceNode = nodeMap.get(edge.source)
-        const targetNode = nodeMap.get(edge.target)
-        
-        if (!sourceNode || !targetNode) return
-        
-        // 如果源节点有电
-        if (powered.has(edge.source)) {
-          // 检查是否有断开的开关阻断
-          if (sourceNode.type === 'switch' && sourceNode.data.status !== 'on') {
-            return
-          }
-          
-          // 传递电力到目标节点
-          if (!powered.has(edge.target)) {
-            powered.add(edge.target)
-            changed = true
-          }
-        }
-      })
+      const queue: string[] = Array.from(powered)
+      const visited = new Set<string>(powered)
+      while (queue.length) {
+        const currentId = queue.shift() as string
+        const currentNode = nodeMap.get(currentId)
+        const neighbors = adjacency.get(currentId)
+        if (!neighbors) continue
+        if (!isPassThrough(currentNode)) continue
+
+        neighbors.forEach((neighborId) => {
+          if (visited.has(neighborId)) return
+          powered.add(neighborId)
+          visited.add(neighborId)
+          queue.push(neighborId)
+          changed = true
+        })
+      }
     }
     
     // 更新节点状态
@@ -334,10 +373,10 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
     setEdges((eds) =>
       eds.map((edge) => {
         const sourceNode = nodeMap.get(edge.source)
+        const targetNode = nodeMap.get(edge.target)
         const sourcePowered = powered.has(edge.source)
         const targetPowered = powered.has(edge.target)
-        const isActive = sourcePowered && targetPowered && 
-          (sourceNode?.type !== 'switch' || sourceNode.data.status === 'on')
+        const isActive = sourcePowered && targetPowered
         
         return {
           ...edge,

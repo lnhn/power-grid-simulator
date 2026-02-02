@@ -284,6 +284,11 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
 
+  const inferTieHandle = useCallback((tieNode: Node | undefined, otherNode: Node | undefined, kind: 'source' | 'target') => {
+    if (!tieNode || !otherNode) return undefined
+    return otherNode.position.x < tieNode.position.x ? `left-${kind}` : `right-${kind}`
+  }, [])
+
   // 当前选中的单个节点（多选时取第一个），用于右侧属性面板
   const selectedNode = nodes.find((n) => n.selected) ?? null
 
@@ -421,6 +426,16 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
         parsedEdges = Array.isArray(edgesData)
           ? edgesData.map((edge) => {
               const edgeData = ((edge?.data as EdgeControlData | undefined) ?? {})
+              const sourceNode = parsedNodes.find((n: Node) => n.id === edge.source)
+              const targetNode = parsedNodes.find((n: Node) => n.id === edge.target)
+              const sourceIsTie = sourceNode?.type === 'switch' && sourceNode?.data?.subType === 'tie'
+              const targetIsTie = targetNode?.type === 'switch' && targetNode?.data?.subType === 'tie'
+              const inferredSourceHandle = sourceIsTie
+                ? inferTieHandle(sourceNode, targetNode, 'source')
+                : edge.sourceHandle
+              const inferredTargetHandle = targetIsTie
+                ? inferTieHandle(targetNode, sourceNode, 'target')
+                : edge.targetHandle
               const cleanOffsetX = Math.abs(edgeData.controlOffsetX ?? 0) < EDGE_SHORT_SEGMENT_MIN ? 0 : Math.round(edgeData.controlOffsetX ?? 0)
               const legacyOffsetY = edgeData.controlOffsetY ?? 0
               const rawSourceOffsetY = edgeData.sourceOffsetY ?? legacyOffsetY
@@ -429,6 +444,8 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
               const cleanTargetOffsetY = Math.abs(rawTargetOffsetY) < EDGE_SHORT_SEGMENT_MIN ? 0 : Math.round(rawTargetOffsetY)
               return {
                 ...edge,
+                sourceHandle: inferredSourceHandle,
+                targetHandle: inferredTargetHandle,
                 data: {
                   ...edgeData,
                   controlOffsetX: cleanOffsetX,
@@ -458,8 +475,19 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
 
   const onConnect = useCallback(
     (params: Connection) => {
-      const edge = {
-        ...params,
+      const source = params.source
+      const target = params.target
+      if (!source || !target) return
+      const sourceNode = nodes.find((n) => n.id === source)
+      const targetNode = nodes.find((n) => n.id === target)
+      const sourceIsTie = sourceNode?.type === 'switch' && sourceNode?.data?.subType === 'tie'
+      const targetIsTie = targetNode?.type === 'switch' && targetNode?.data?.subType === 'tie'
+      const edge: Edge = {
+        id: `e-${source}-${target}-${Date.now()}`,
+        source,
+        target,
+        sourceHandle: sourceIsTie ? inferTieHandle(sourceNode, targetNode, 'source') : params.sourceHandle,
+        targetHandle: targetIsTie ? inferTieHandle(targetNode, sourceNode, 'target') : params.targetHandle,
         type: 'smoothstep', // 曼哈顿式连线
         markerEnd: { type: MarkerType.ArrowClosed },
         style: { strokeWidth: 2, stroke: '#64748b' },
@@ -474,7 +502,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
       }
       setEdges((eds) => addEdge(edge, eds))
     },
-    [setEdges]
+    [setEdges, nodes, inferTieHandle]
   )
 
   const addNode = (type: string, subType?: string) => {
@@ -501,7 +529,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
   const getNodeLabel = (type: string, subType?: string) => {
     const labels: Record<string, string> = {
       powerSource: '三相电源',
-      switch: '断路器',
+      switch: subType === 'tie' ? '母联' : '断路器',
       bus: '母线',
     }
     
@@ -550,15 +578,25 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
         },
       }))
 
-      const cleanEdges = edges.map(edge => ({
+      const cleanEdges = edges.map(edge => {
+        const sourceNode = nodes.find((n) => n.id === edge.source)
+        const targetNode = nodes.find((n) => n.id === edge.target)
+        const sourceIsTie = sourceNode?.type === 'switch' && sourceNode?.data?.subType === 'tie'
+        const targetIsTie = targetNode?.type === 'switch' && targetNode?.data?.subType === 'tie'
+        const sourceHandle = sourceIsTie ? inferTieHandle(sourceNode, targetNode, 'source') : edge.sourceHandle
+        const targetHandle = targetIsTie ? inferTieHandle(targetNode, sourceNode, 'target') : edge.targetHandle
+        return ({
         id: edge.id,
         source: edge.source,
         target: edge.target,
+        sourceHandle,
+        targetHandle,
         type: edge.type,
         markerEnd: edge.markerEnd,
         style: edge.style,
         data: edge.data,
-      }))
+        })
+      })
 
       console.log('Saving nodes:', cleanNodes.length)
       console.log('Saving edges:', cleanEdges.length)
@@ -966,6 +1004,18 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                 description="电路保护开关"
                 color="green"
                 onClick={() => addNode('switch')}
+              />
+
+              <ComponentButton
+                icon={
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 7h12M6 17h12M9 7v10m6-10v10" />
+                  </svg>
+                }
+                label="母联"
+                description="双向联络开关"
+                color="emerald"
+                onClick={() => addNode('switch', 'tie')}
               />
               
               <ComponentButton
@@ -1399,6 +1449,7 @@ function ComponentButton({
   const colorClasses: Record<string, string> = {
     blue: 'bg-blue-50 hover:bg-blue-100 border-blue-200 hover:border-blue-400 text-blue-600',
     green: 'bg-green-50 hover:bg-green-100 border-green-200 hover:border-green-400 text-green-600',
+    emerald: 'bg-emerald-50 hover:bg-emerald-100 border-emerald-200 hover:border-emerald-400 text-emerald-600',
     indigo: 'bg-indigo-50 hover:bg-indigo-100 border-indigo-200 hover:border-indigo-400 text-indigo-600',
     cyan: 'bg-cyan-50 hover:bg-cyan-100 border-cyan-200 hover:border-cyan-400 text-cyan-600',
     sky: 'bg-sky-50 hover:bg-sky-100 border-sky-200 hover:border-sky-400 text-sky-600',

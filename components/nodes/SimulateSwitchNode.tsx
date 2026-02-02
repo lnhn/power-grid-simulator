@@ -4,13 +4,15 @@ import { Handle, Position, NodeProps } from 'reactflow'
 export const SimulateSwitchNode = memo(({ data, id }: NodeProps) => {
   const isOn = data.status === 'on'
   const isPowered = data.powered
+  const isTie = data.subType === 'tie'
   
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation()
     const newStatus = isOn ? '断开' : '闭合'
     const message =
       `当前状态: ${isOn ? '闭合' : '断开'}\n` +
-      `操作后: ${newStatus}`
+      `操作后: ${newStatus}` +
+      (isTie ? '\n母联为双向联络开关' : '')
 
     if (typeof data.onRequestConfirm === 'function') {
       data.onRequestConfirm({
@@ -55,23 +57,66 @@ export const SimulateSwitchNode = memo(({ data, id }: NodeProps) => {
         {isPowered && isOn && (
           <div className="flex items-center space-x-1 px-2 py-1 bg-blue-100 rounded-full">
             <div className="w-1.5 h-1.5 rounded-full bg-blue-500 electricity-flow"></div>
-            <span className="text-xs font-medium text-blue-700">通电</span>
-          </div>
+                <span className="text-xs font-medium text-blue-700">通电</span>
+              </div>
         )}
       </div>
+
+      {isTie && (
+        <div className="mt-2">
+          <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+            母联（双向）
+          </span>
+        </div>
+      )}
       
-      <Handle
-        type="target"
-        position={Position.Top}
-        className={`!w-4 !h-4 !border-2 !border-white transition-colors ${isPowered ? '!bg-blue-500' : '!bg-gray-400'}`}
-        style={{ top: -8, pointerEvents: 'none' }}
-      />
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        className={`!w-4 !h-4 !border-2 !border-white transition-colors ${isPowered && isOn ? '!bg-blue-500' : '!bg-gray-400'}`}
-        style={{ bottom: -8, pointerEvents: 'none' }}
-      />
+      {!isTie ? (
+        <>
+          <Handle
+            type="target"
+            position={Position.Top}
+            className={`!w-4 !h-4 !border-2 !border-white transition-colors ${isPowered ? '!bg-blue-500' : '!bg-gray-400'}`}
+            style={{ top: -8, pointerEvents: 'none' }}
+          />
+          <Handle
+            type="source"
+            position={Position.Bottom}
+            className={`!w-4 !h-4 !border-2 !border-white transition-colors ${isPowered && isOn ? '!bg-blue-500' : '!bg-gray-400'}`}
+            style={{ bottom: -8, pointerEvents: 'none' }}
+          />
+        </>
+      ) : (
+        <>
+          <Handle
+            id="left-target"
+            type="target"
+            position={Position.Left}
+            className={`!w-4 !h-4 !border-2 !border-white transition-colors ${isPowered ? '!bg-blue-500' : '!bg-gray-400'}`}
+            style={{ left: -8, pointerEvents: 'none' }}
+          />
+          <Handle
+            id="left-source"
+            type="source"
+            position={Position.Left}
+            className={`!w-4 !h-4 !border-2 !border-white transition-colors ${isPowered && isOn ? '!bg-blue-500' : '!bg-gray-400'}`}
+            style={{ left: -8, pointerEvents: 'none' }}
+          />
+          <Handle
+            id="right-target"
+            type="target"
+            position={Position.Right}
+            className={`!w-4 !h-4 !border-2 !border-white transition-colors ${isPowered ? '!bg-blue-500' : '!bg-gray-400'}`}
+            style={{ right: -8, pointerEvents: 'none' }}
+          />
+          <Handle
+            id="right-source"
+            type="source"
+            position={Position.Right}
+            className={`!w-4 !h-4 !border-2 !border-white transition-colors ${isPowered && isOn ? '!bg-blue-500' : '!bg-gray-400'}`}
+            style={{ right: -8, pointerEvents: 'none' }}
+          />
+        </>
+      )}
     </div>
   )
 })
