@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import ReactFlow, {
@@ -21,6 +21,7 @@ import ReactFlow, {
   EdgeLabelRenderer,
   Position,
   useReactFlow,
+  ReactFlowInstance,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 
@@ -30,6 +31,7 @@ interface EdgeControlData {
   sourceOffsetY?: number
   targetOffsetY?: number
   isActive?: boolean
+  voltage?: number
 }
 
 type Point = { x: number; y: number }
@@ -251,6 +253,8 @@ import { PowerSourceNode } from '@/components/nodes/PowerSourceNode'
 import { SwitchNode } from '@/components/nodes/SwitchNode'
 import { LoadNode } from '@/components/nodes/LoadNode'
 import { BusNode } from '@/components/nodes/BusNode'
+import { TransformerNode } from '@/components/nodes/TransformerNode'
+import { buildGridModels, GridSolver, NodeModel } from '@/lib/grid'
 import { Toast } from '@/components/Toast'
 
 const nodeTypes = {
@@ -258,11 +262,14 @@ const nodeTypes = {
   switch: SwitchNode,
   load: LoadNode,
   bus: BusNode,
+  transformer: TransformerNode,
 }
 
 const edgeTypes = {
   smoothstep: UpdatableEdge,
 }
+
+type Side = 'top' | 'bottom' | 'left' | 'right'
 
 interface GridData {
   id: string
@@ -275,18 +282,185 @@ interface GridData {
 export default function EditGridPage({ params }: { params: { id: string } }) {
   const { data: session, status } = useSession()
   const router = useRouter()
-  const [nodes, setNodes, onNodesChange] = useNodesState([])
-  const [edges, setEdges, onEdgesChange] = useEdgesState([])
+  const [nodes, setNodes, baseOnNodesChange] = useNodesState([])
+  const [edges, setEdges, baseOnEdgesChange] = useEdgesState([])
   const [grid, setGrid] = useState<GridData | null>(null)
   const [gridName, setGridName] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
+  const [validationCollapsed, setValidationCollapsed] = useState(false)
+  const [showUnpowered, setShowUnpowered] = useState(true)
+  const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null)
+  const [previewDrawerOpen, setPreviewDrawerOpen] = useState(false)
+  const historyRef = useRef<{ nodes: Node[]; edges: Edge[] }[]>([])
+  const historyIndexRef = useRef(-1)
+  const isRestoringRef = useRef(false)
+  const clipboardRef = useRef<{ nodes: Node[]; edges: Edge[] } | null>(null)
+  const historyTimerRef = useRef<number | null>(null)
+  const nodesRef = useRef<Node[]>([])
+  const edgesRef = useRef<Edge[]>([])
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
+  nodesRef.current = nodes
+  edgesRef.current = edges
+
+  const pushHistory = useCallback((nextNodes: Node[], nextEdges: Edge[]) => {
+    if (isRestoringRef.current) return
+    const snapshot = {
+      nodes: JSON.parse(JSON.stringify(nextNodes)) as Node[],
+      edges: JSON.parse(JSON.stringify(nextEdges)) as Edge[],
+    }
+    const stack = historyRef.current.slice(0, historyIndexRef.current + 1)
+    stack.push(snapshot)
+    const limit = 50
+    if (stack.length > limit) {
+      stack.shift()
+    }
+    historyRef.current = stack
+    historyIndexRef.current = stack.length - 1
+  }, [])
+
+  const restoreHistory = useCallback((index: number) => {
+    const stack = historyRef.current
+    if (index < 0 || index >= stack.length) return
+    const snapshot = stack[index]
+    isRestoringRef.current = true
+    setNodes(snapshot.nodes)
+    setEdges(snapshot.edges)
+    isRestoringRef.current = false
+    historyIndexRef.current = index
+  }, [setNodes, setEdges])
+
+  const handleUndo = useCallback(() => {
+    restoreHistory(historyIndexRef.current - 1)
+  }, [restoreHistory])
+
+  const handleRedo = useCallback(() => {
+    restoreHistory(historyIndexRef.current + 1)
+  }, [restoreHistory])
+
+  const handleCopy = useCallback(() => {
+    const selectedNodes = nodes.filter((node) => node.selected)
+    if (selectedNodes.length === 0) return
+    const selectedNodeIds = new Set(selectedNodes.map((node) => node.id))
+    const selectedEdges = edges.filter(
+      (edge) => selectedNodeIds.has(edge.source) && selectedNodeIds.has(edge.target)
+    )
+    clipboardRef.current = {
+      nodes: JSON.parse(JSON.stringify(selectedNodes)) as Node[],
+      edges: JSON.parse(JSON.stringify(selectedEdges)) as Edge[],
+    }
+  }, [nodes, edges])
+
+  const handlePaste = useCallback(() => {
+    if (!clipboardRef.current) return
+    const { nodes: copiedNodes, edges: copiedEdges } = clipboardRef.current
+    const idMap = new Map<string, string>()
+    const offset = 30
+    const newNodes = copiedNodes.map((node, index) => {
+      const newId = `${node.id}_copy_${Date.now()}_${index}`
+      idMap.set(node.id, newId)
+      return {
+        ...node,
+        id: newId,
+        position: { x: node.position.x + offset, y: node.position.y + offset },
+        selected: true,
+      }
+    })
+    const newEdges = copiedEdges.map((edge, index) => ({
+      ...edge,
+      id: `${edge.id}_copy_${Date.now()}_${index}`,
+      source: idMap.get(edge.source) || edge.source,
+      target: idMap.get(edge.target) || edge.target,
+      selected: false,
+    }))
+    setNodes((nds) => {
+      const next = nds.map((node) => ({ ...node, selected: false })).concat(newNodes)
+      pushHistory(next, edges.concat(newEdges))
+      return next
+    })
+    setEdges((eds) => eds.concat(newEdges))
+  }, [edges, pushHistory, setNodes, setEdges])
+
+  useEffect(() => {
+    if (historyIndexRef.current === -1) {
+      pushHistory(nodes, edges)
+    }
+  }, [nodes, edges, pushHistory])
+
+  const scheduleHistoryPush = useCallback(() => {
+    if (historyTimerRef.current) {
+      window.clearTimeout(historyTimerRef.current)
+    }
+    historyTimerRef.current = window.setTimeout(() => {
+      if (isRestoringRef.current) return
+      pushHistory(nodesRef.current, edgesRef.current)
+    }, 250)
+  }, [pushHistory])
 
   const inferTieHandle = useCallback((tieNode: Node | undefined, otherNode: Node | undefined, kind: 'source' | 'target') => {
     if (!tieNode || !otherNode) return undefined
     return otherNode.position.x < tieNode.position.x ? `left-${kind}` : `right-${kind}`
+  }, [])
+
+  const normalizeTieHandle = useCallback((handle: string | undefined, kind: 'source' | 'target') => {
+    if (!handle) return handle
+    if (kind === 'source' && handle.includes('target')) return handle.replace('target', 'source')
+    if (kind === 'target' && handle.includes('source')) return handle.replace('source', 'target')
+    return handle
+  }, [])
+
+  const inferSide = useCallback(
+    (nodeId: string, edge: Edge, isSource: boolean, nodeMap: Map<string, Node>): Side => {
+      const node = nodeMap.get(nodeId)
+      const otherId = isSource ? edge.target : edge.source
+      const other = nodeMap.get(otherId)
+
+      if (node?.type === 'switch' && node?.data?.subType === 'tie') {
+        if (other && other.position.x < node.position.x) return 'left'
+        if (other) return 'right'
+        return 'left'
+      }
+
+      const handle = isSource ? edge.sourceHandle : edge.targetHandle
+      if (handle?.includes('left')) return 'left'
+      if (handle?.includes('right')) return 'right'
+      if (handle?.includes('top')) return 'top'
+      if (handle?.includes('bottom')) return 'bottom'
+
+      if (node?.type === 'switch') {
+        if (other && other.position.y < node.position.y) return 'top'
+        return 'bottom'
+      }
+
+      if (node?.type === 'powerSource') return 'bottom'
+      if (node?.type === 'load') return 'top'
+
+      if (node?.type === 'bus') {
+        if (other) {
+          if (other.position.x < node.position.x) return 'left'
+          if (other.position.x > node.position.x) return 'right'
+          if (other.position.y < node.position.y) return 'top'
+        }
+        return 'bottom'
+      }
+
+      return isSource ? 'bottom' : 'top'
+    },
+    []
+  )
+
+  const toNodeModel = useCallback((node: Node) => {
+    return new NodeModel(
+      node.id,
+      (node.type || 'bus') as NodeModel['type'],
+      {
+        status: node.data?.status,
+        subType: node.data?.subType,
+        voltage: node.data?.voltage,
+      },
+      node.position
+    )
   }, [])
 
   // 当前选中的单个节点（多选时取第一个），用于右侧属性面板
@@ -371,6 +545,47 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
     setSelectedEdge(null)
   }, [setEdges])
 
+  const selectNodeById = useCallback((nodeId: string) => {
+    setNodes((nds) =>
+      nds.map((node) => ({
+        ...node,
+        selected: node.id === nodeId,
+      }))
+    )
+    setEdges((eds) =>
+      eds.map((edge) => ({
+        ...edge,
+        selected: false,
+        data: {
+          ...((edge.data as EdgeControlData | undefined) ?? {}),
+          isActive: false,
+        },
+      }))
+    )
+    setSelectedEdge(null)
+  }, [setNodes, setEdges])
+
+  const selectEdgeById = useCallback((edgeId: string) => {
+    setEdges((eds) =>
+      eds.map((edge) => ({
+        ...edge,
+        selected: edge.id === edgeId,
+        data: {
+          ...((edge.data as EdgeControlData | undefined) ?? {}),
+          isActive: edge.id === edgeId,
+        },
+      }))
+    )
+    setNodes((nds) =>
+      nds.map((node) => ({
+        ...node,
+        selected: false,
+      }))
+    )
+    const nextEdge = edges.find((edge) => edge.id === edgeId) ?? null
+    setSelectedEdge(nextEdge)
+  }, [setEdges, setNodes, edges])
+
 
 
   useEffect(() => {
@@ -390,6 +605,65 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
     const latestEdge = edges.find((edge) => edge.id === selectedEdge.id) ?? null
     setSelectedEdge(latestEdge)
   }, [edges, selectedEdge])
+
+  const validation = useMemo(() => {
+    const issues: { id: string; message: string }[] = []
+    if (nodes.length === 0) return issues
+    const nodeMap = new Map(nodes.map((node) => [node.id, node]))
+    const inputCounts = new Map<string, number>()
+
+    edges.forEach((edge) => {
+      const sourceNode = nodeMap.get(edge.source)
+      const targetNode = nodeMap.get(edge.target)
+      if (!sourceNode || !targetNode) return
+      const sourceSide = inferSide(edge.source, edge, true, nodeMap)
+      const targetSide = inferSide(edge.target, edge, false, nodeMap)
+      const sourceModel = toNodeModel(sourceNode)
+      const targetModel = toNodeModel(targetNode)
+
+      if (!sourceModel.isOutputSideAllowed(sourceSide)) {
+        issues.push({ id: `edge:${edge.id}:source`, message: `连线 ${edge.id} 从错误的输出端口引出` })
+      }
+      if (!targetModel.isInputSideAllowed(targetSide)) {
+        issues.push({ id: `edge:${edge.id}:target`, message: `连线 ${edge.id} 接入了错误的输入端口` })
+      }
+
+      const multiplicitySide = targetModel.getMultiplicitySide(targetSide)
+      if (multiplicitySide) {
+        const key = `${targetNode.id}:${multiplicitySide}`
+        const count = (inputCounts.get(key) ?? 0) + 1
+        inputCounts.set(key, count)
+      }
+    })
+
+    inputCounts.forEach((count, key) => {
+      if (count <= 1) return
+      const [nodeId] = key.split(':')
+      const node = nodeMap.get(nodeId)
+      if (!node) return
+      const model = toNodeModel(node)
+      const isTie = model.type === 'switch' && model.data.subType === 'tie'
+      const isBus = model.type === 'bus'
+      if (isTie || isBus) return
+      issues.push({ id: `node:${nodeId}:multi`, message: `节点 ${node.data?.label || nodeId} 输入端口连接了多条线路` })
+    })
+
+    const { nodeModels, edgeModels } = buildGridModels(nodes, edges)
+    const result = GridSolver.solve(nodeModels, edgeModels)
+
+    nodes.forEach((node) => {
+      if (node.type === 'powerSource') return
+      const powered = result.nodePowered.get(node.id) ?? false
+      if (!powered && showUnpowered) {
+        issues.push({ id: `node:${node.id}:island`, message: `节点 ${node.data?.label || node.id} 未接入电源` })
+      }
+      if (node.type === 'load' && node.data?.status === 'running' && !powered) {
+        issues.push({ id: `node:${node.id}:load`, message: `负载 ${node.data?.label || node.id} 运行但未供电` })
+      }
+    })
+
+    return issues
+  }, [nodes, edges, inferSide, toNodeModel, showUnpowered])
 
   const fetchGrid = async () => {
     try {
@@ -431,10 +705,10 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
               const sourceIsTie = sourceNode?.type === 'switch' && sourceNode?.data?.subType === 'tie'
               const targetIsTie = targetNode?.type === 'switch' && targetNode?.data?.subType === 'tie'
               const inferredSourceHandle = sourceIsTie
-                ? inferTieHandle(sourceNode, targetNode, 'source')
+                ? (edge.sourceHandle ? normalizeTieHandle(edge.sourceHandle, 'source') : inferTieHandle(sourceNode, targetNode, 'source'))
                 : edge.sourceHandle
               const inferredTargetHandle = targetIsTie
-                ? inferTieHandle(targetNode, sourceNode, 'target')
+                ? (edge.targetHandle ? normalizeTieHandle(edge.targetHandle, 'target') : inferTieHandle(targetNode, sourceNode, 'target'))
                 : edge.targetHandle
               const cleanOffsetX = Math.abs(edgeData.controlOffsetX ?? 0) < EDGE_SHORT_SEGMENT_MIN ? 0 : Math.round(edgeData.controlOffsetX ?? 0)
               const legacyOffsetY = edgeData.controlOffsetY ?? 0
@@ -453,6 +727,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                   targetOffsetY: cleanTargetOffsetY,
                   controlOffsetY: 0,
                   isActive: false,
+                  voltage: edgeData.voltage ?? 380,
                 },
               }
             })
@@ -480,14 +755,50 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
       if (!source || !target) return
       const sourceNode = nodes.find((n) => n.id === source)
       const targetNode = nodes.find((n) => n.id === target)
+      if (!sourceNode || !targetNode) return
       const sourceIsTie = sourceNode?.type === 'switch' && sourceNode?.data?.subType === 'tie'
       const targetIsTie = targetNode?.type === 'switch' && targetNode?.data?.subType === 'tie'
+      const nodeMap = new Map(nodes.map((node) => [node.id, node]))
+      const sourceModel = toNodeModel(sourceNode)
+      const targetModel = toNodeModel(targetNode)
+      const tempEdge = {
+        id: 'temp',
+        source,
+        target,
+        sourceHandle: params.sourceHandle,
+        targetHandle: params.targetHandle,
+      } as Edge
+      const targetSide = inferSide(target, tempEdge, false, nodeMap)
+      const sourceSide = inferSide(source, tempEdge, true, nodeMap)
+      const inputSide = targetModel.getMultiplicitySide(targetSide)
+
+      if (!sourceModel.isOutputSideAllowed(sourceSide)) {
+        setToast({ message: '连线必须从输出端口引出', type: 'error' })
+        return
+      }
+
+      if (!targetModel.isInputSideAllowed(targetSide)) {
+        setToast({ message: '连线必须接入输入端口', type: 'error' })
+        return
+      }
+
+      if (targetModel.type !== 'switch' || targetModel.data.subType !== 'tie') {
+        const existingInput = edges.some((edge) => {
+          if (edge.target !== target) return false
+          const edgeTargetSide = inferSide(target, edge, false, nodeMap)
+          return edgeTargetSide === inputSide
+        })
+        if (existingInput) {
+          setToast({ message: '该节点输入端口已连接一条线路', type: 'error' })
+          return
+        }
+      }
       const edge: Edge = {
         id: `e-${source}-${target}-${Date.now()}`,
         source,
         target,
-        sourceHandle: sourceIsTie ? inferTieHandle(sourceNode, targetNode, 'source') : params.sourceHandle,
-        targetHandle: targetIsTie ? inferTieHandle(targetNode, sourceNode, 'target') : params.targetHandle,
+        sourceHandle: params.sourceHandle,
+        targetHandle: params.targetHandle,
         type: 'smoothstep', // 曼哈顿式连线
         markerEnd: { type: MarkerType.ArrowClosed },
         style: { strokeWidth: 2, stroke: '#64748b' },
@@ -498,32 +809,44 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
           targetOffsetY: 0,
           controlOffsetY: 0,
           isActive: false,
+          voltage: 380,
         } as EdgeControlData,
       }
-      setEdges((eds) => addEdge(edge, eds))
+      setEdges((eds) => {
+        const next = addEdge(edge, eds)
+        pushHistory(nodes, next)
+        return next
+      })
     },
     [setEdges, nodes, inferTieHandle]
   )
 
-  const addNode = (type: string, subType?: string) => {
+  const addNode = (type: string, subType?: string, position?: { x: number; y: number }) => {
     const id = `${type}_${Date.now()}`
     const newNode: Node = {
       id,
       type,
-      position: { 
+      position: position ?? { 
         x: 350 + Math.random() * 300, 
         y: 100 + nodes.length * 120 
       },
       data: {
         label: getNodeLabel(type, subType),
         status: type === 'switch' ? 'off' : (type === 'load' ? 'stopped' : 'normal'),
-        voltage: type === 'powerSource' ? 380 : 0,
+        voltage: type === 'powerSource' || type === 'transformer' ? 380 : 0,
         current: 0,
         subType: subType,
         power: type === 'load' ? getLoadPower(subType) : 0,
+        ratio: type === 'transformer' ? 1 : undefined,
+        capacity: type === 'transformer' ? 1000 : undefined,
+        ratedCurrent: type === 'switch' ? 630 : undefined,
       },
     }
-    setNodes((nds) => [...nds, newNode])
+    setNodes((nds) => {
+      const next = [...nds, newNode]
+      pushHistory(next, edges)
+      return next
+    })
   }
 
   const getNodeLabel = (type: string, subType?: string) => {
@@ -531,6 +854,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
       powerSource: '三相电源',
       switch: subType === 'tie' ? '母联' : '断路器',
       bus: '母线',
+      transformer: '变压器',
     }
     
     if (type === 'load') {
@@ -560,6 +884,39 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
     return powers[subType || 'pump'] || 50
   }
 
+  const onDragOver = useCallback((event: React.DragEvent) => {
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+  }, [])
+
+  const onDrop = useCallback(
+    (event: React.DragEvent) => {
+      event.preventDefault()
+      const type = event.dataTransfer.getData('application/reactflow')
+      if (!type) return
+      const subType = event.dataTransfer.getData('application/reactflow-subtype') || undefined
+      const bounds = reactFlowWrapper.current?.getBoundingClientRect()
+      if (!bounds || !rfInstance) return
+      const position = rfInstance.project({
+        x: event.clientX - bounds.left,
+        y: event.clientY - bounds.top,
+      })
+      addNode(type, subType, position)
+    },
+    [addNode, rfInstance, reactFlowWrapper]
+  )
+
+  const handleDragStart = useCallback(
+    (type: string, subType?: string) => (event: React.DragEvent) => {
+      event.dataTransfer.setData('application/reactflow', type)
+      if (subType) {
+        event.dataTransfer.setData('application/reactflow-subtype', subType)
+      }
+      event.dataTransfer.effectAllowed = 'move'
+    },
+    []
+  )
+
   const handleSave = async () => {
     setSaving(true)
     try {
@@ -575,6 +932,9 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
           current: node.data.current,
           subType: node.data.subType,
           power: node.data.power,
+          ratio: node.data.ratio,
+          capacity: node.data.capacity,
+          ratedCurrent: node.data.ratedCurrent,
         },
       }))
 
@@ -583,8 +943,12 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
         const targetNode = nodes.find((n) => n.id === edge.target)
         const sourceIsTie = sourceNode?.type === 'switch' && sourceNode?.data?.subType === 'tie'
         const targetIsTie = targetNode?.type === 'switch' && targetNode?.data?.subType === 'tie'
-        const sourceHandle = sourceIsTie ? inferTieHandle(sourceNode, targetNode, 'source') : edge.sourceHandle
-        const targetHandle = targetIsTie ? inferTieHandle(targetNode, sourceNode, 'target') : edge.targetHandle
+        const sourceHandle = sourceIsTie
+          ? (edge.sourceHandle ? normalizeTieHandle(edge.sourceHandle, 'source') : inferTieHandle(sourceNode, targetNode, 'source'))
+          : edge.sourceHandle
+        const targetHandle = targetIsTie
+          ? (edge.targetHandle ? normalizeTieHandle(edge.targetHandle, 'target') : inferTieHandle(targetNode, sourceNode, 'target'))
+          : edge.targetHandle
         return ({
         id: edge.id,
         source: edge.source,
@@ -628,9 +992,41 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
     }
   }
 
+  const onNodesChange = useCallback(
+    (changes: Parameters<typeof baseOnNodesChange>[0]) => {
+      baseOnNodesChange(changes)
+      if (isRestoringRef.current) return
+      if (changes.some((change) => change.type !== 'select')) {
+        scheduleHistoryPush()
+      }
+    },
+    [baseOnNodesChange, scheduleHistoryPush]
+  )
+
+  const onEdgesChange = useCallback(
+    (changes: Parameters<typeof baseOnEdgesChange>[0]) => {
+      baseOnEdgesChange(changes)
+      if (isRestoringRef.current) return
+      if (changes.some((change) => change.type !== 'select')) {
+        scheduleHistoryPush()
+      }
+    },
+    [baseOnEdgesChange, scheduleHistoryPush]
+  )
+
   const deleteSelectedElements = useCallback(() => {
-    setNodes((nds) => nds.filter((node) => !node.selected))
-    setEdges((eds) => eds.filter((edge) => !edge.selected))
+    setNodes((nds) => {
+      const nextNodes = nds.filter((node) => !node.selected)
+      const selectedNodeIds = new Set(nds.filter((node) => node.selected).map((node) => node.id))
+      setEdges((eds) => {
+        const nextEdges = eds.filter(
+          (edge) => !edge.selected && !selectedNodeIds.has(edge.source) && !selectedNodeIds.has(edge.target)
+        )
+        pushHistory(nextNodes, nextEdges)
+        return nextEdges
+      })
+      return nextNodes
+    })
   }, [setNodes, setEdges])
 
   // 对齐功能
@@ -773,13 +1169,41 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if ((event.key === 'Delete' || event.key === 'Backspace') && !['INPUT', 'TEXTAREA'].includes((event.target as HTMLElement).tagName)) {
+      const tag = (event.target as HTMLElement).tagName
+      if (['INPUT', 'TEXTAREA'].includes(tag)) return
+
+      const isMeta = event.metaKey || event.ctrlKey
+      if (isMeta && event.key.toLowerCase() === 'z') {
+        event.preventDefault()
+        if (event.shiftKey) {
+          handleRedo()
+        } else {
+          handleUndo()
+        }
+        return
+      }
+      if (isMeta && event.key.toLowerCase() === 'y') {
+        event.preventDefault()
+        handleRedo()
+        return
+      }
+      if (isMeta && event.key.toLowerCase() === 'c') {
+        event.preventDefault()
+        handleCopy()
+        return
+      }
+      if (isMeta && event.key.toLowerCase() === 'v') {
+        event.preventDefault()
+        handlePaste()
+        return
+      }
+      if ((event.key === 'Delete' || event.key === 'Backspace')) {
         deleteSelectedElements()
       }
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [deleteSelectedElements])
+  }, [deleteSelectedElements, handleUndo, handleRedo, handleCopy, handlePaste])
 
   if (status === 'loading' || loading) {
     return (
@@ -821,135 +1245,6 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
           </div>
           
           <div className="flex items-center space-x-3">
-            {/* 对齐工具 */}
-            <div className="flex items-center space-x-1 px-3 py-1 bg-gray-100 rounded-lg border border-gray-300">
-              <span className="text-xs font-medium text-gray-600 mr-2">对齐:</span>
-              <button
-                onClick={() => alignNodes('left')}
-                className="p-1.5 hover:bg-white rounded transition"
-                title="左对齐"
-              >
-                <svg className="w-4 h-4 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                </svg>
-              </button>
-              <button
-                onClick={() => alignNodes('center-h')}
-                className="p-1.5 hover:bg-white rounded transition"
-                title="水平居中"
-              >
-                <svg className="w-4 h-4 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" />
-                </svg>
-              </button>
-              <button
-                onClick={() => alignNodes('right')}
-                className="p-1.5 hover:bg-white rounded transition"
-                title="右对齐"
-              >
-                <svg className="w-4 h-4 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 6H4M20 12H4M20 18H4" />
-                </svg>
-              </button>
-              <div className="w-px h-4 bg-gray-300 mx-1"></div>
-              <button
-                onClick={() => alignNodes('top')}
-                className="p-1.5 hover:bg-white rounded transition"
-                title="顶部对齐"
-              >
-                <svg className="w-4 h-4 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14M5 12l7 7 7-7" />
-                </svg>
-              </button>
-              <button
-                onClick={() => alignNodes('center-v')}
-                className="p-1.5 hover:bg-white rounded transition"
-                title="垂直居中"
-              >
-                <svg className="w-4 h-4 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
-                </svg>
-              </button>
-              <button
-                onClick={() => alignNodes('bottom')}
-                className="p-1.5 hover:bg-white rounded transition"
-                title="底部对齐"
-              >
-                <svg className="w-4 h-4 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19V5m7 7l-7 7-7-7" />
-                </svg>
-              </button>
-            </div>
-
-            {/* 分布工具 */}
-            <div className="flex items-center space-x-1 px-3 py-1 bg-gray-100 rounded-lg border border-gray-300">
-              <span className="text-xs font-medium text-gray-600 mr-2">分布:</span>
-              <button
-                onClick={() => distributeNodes('horizontal')}
-                className="p-1.5 hover:bg-white rounded transition"
-                title="水平均匀分布"
-              >
-                <svg className="w-4 h-4 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12M4 12h16M8 17h12" />
-                </svg>
-              </button>
-              <button
-                onClick={() => distributeNodes('vertical')}
-                className="p-1.5 hover:bg-white rounded transition"
-                title="垂直均匀分布"
-              >
-                <svg className="w-4 h-4 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8v8M12 4v16M17 8v8" />
-                </svg>
-              </button>
-              <button
-                onClick={() => distributeHorizontalWithGap(80)}
-                className="p-1.5 hover:bg-white rounded transition"
-                title="水平等间距 80px"
-              >
-                <span className="text-xs text-gray-600">80</span>
-              </button>
-              <button
-                onClick={() => distributeVerticalWithGap(80)}
-                className="p-1.5 hover:bg-white rounded transition"
-                title="垂直等间距 80px"
-              >
-                <span className="text-xs text-gray-600">80↓</span>
-              </button>
-            </div>
-
-            {/* 网格与层级 */}
-            <div className="flex items-center space-x-1 px-3 py-1 bg-gray-100 rounded-lg border border-gray-300">
-              <span className="text-xs font-medium text-gray-600 mr-2">其他:</span>
-              <button
-                onClick={snapNodesToGrid}
-                className="p-1.5 hover:bg-white rounded transition"
-                title="对齐到网格 (15px)"
-              >
-                <svg className="w-4 h-4 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
-                </svg>
-              </button>
-              <button
-                onClick={bringToFront}
-                className="p-1.5 hover:bg-white rounded transition"
-                title="置于顶层"
-              >
-                <svg className="w-4 h-4 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-                </svg>
-              </button>
-              <button
-                onClick={sendToBack}
-                className="p-1.5 hover:bg-white rounded transition"
-                title="置于底层"
-              >
-                <svg className="w-4 h-4 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-            </div>
-
             <button
               onClick={handleSave}
               disabled={saving}
@@ -959,6 +1254,15 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
               </svg>
               <span>{saving ? '保存中...' : '保存'}</span>
+            </button>
+            <button
+              onClick={() => setPreviewDrawerOpen(true)}
+              className="flex items-center space-x-2 px-4 py-2 rounded-lg transition shadow-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553 2.276a1 1 0 010 1.789L15 16M4 6h7a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V8a2 2 0 012-2z" />
+              </svg>
+              <span>预览</span>
             </button>
           </div>
         </div>
@@ -988,6 +1292,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                 description="380V 工业电源"
                 color="blue"
                 onClick={() => addNode('powerSource')}
+                onDragStart={handleDragStart('powerSource')}
               />
             </div>
 
@@ -1004,6 +1309,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                 description="电路保护开关"
                 color="green"
                 onClick={() => addNode('switch')}
+                onDragStart={handleDragStart('switch')}
               />
 
               <ComponentButton
@@ -1016,6 +1322,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                 description="双向联络开关"
                 color="emerald"
                 onClick={() => addNode('switch', 'tie')}
+                onDragStart={handleDragStart('switch', 'tie')}
               />
               
               <ComponentButton
@@ -1028,6 +1335,20 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                 description="电力分配节点"
                 color="indigo"
                 onClick={() => addNode('bus')}
+                onDragStart={handleDragStart('bus')}
+              />
+
+              <ComponentButton
+                icon={
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v6m0 0l3-3m-3 3L9 6m9 6a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                }
+                label="变压器"
+                description="电压变换"
+                color="amber"
+                onClick={() => addNode('transformer')}
+                onDragStart={handleDragStart('transformer')}
               />
             </div>
             
@@ -1045,6 +1366,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                 description="75kW 离心泵"
                 color="cyan"
                 onClick={() => addNode('load', 'pump')}
+                onDragStart={handleDragStart('load', 'pump')}
               />
               
               <ComponentButton
@@ -1057,6 +1379,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                 description="55kW 轴流风机"
                 color="sky"
                 onClick={() => addNode('load', 'fan')}
+                onDragStart={handleDragStart('load', 'fan')}
               />
               
               <ComponentButton
@@ -1069,6 +1392,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                 description="90kW 空压机"
                 color="purple"
                 onClick={() => addNode('load', 'compressor')}
+                onDragStart={handleDragStart('load', 'compressor')}
               />
               
               <ComponentButton
@@ -1081,6 +1405,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                 description="45kW 混料机"
                 color="pink"
                 onClick={() => addNode('load', 'mixer')}
+                onDragStart={handleDragStart('load', 'mixer')}
               />
               
               <ComponentButton
@@ -1093,6 +1418,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                 description="30kW 输送机"
                 color="amber"
                 onClick={() => addNode('load', 'conveyor')}
+                onDragStart={handleDragStart('load', 'conveyor')}
               />
               
               <ComponentButton
@@ -1105,6 +1431,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                 description="100kW 电加热"
                 color="red"
                 onClick={() => addNode('load', 'heater')}
+                onDragStart={handleDragStart('load', 'heater')}
               />
             </div>
 
@@ -1134,13 +1461,71 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                 <p className="text-xs text-blue-700">
                   <strong>选择技巧：</strong><br/>
                   • 点击节点单选，Shift+点击 多选，拖拽 框选<br/>
-                  • 对齐：左/右/上/下、水平/垂直居中<br/>
-                  • 分布：均匀分布、等间距 80px<br/>
-                  • 其他：对齐到网格、置于顶层/底层
+                  • 通过拖拽放置元件到画布<br/>
+                  • 选中后可 Delete 删除<br/>
+                  • 使用快捷键复制/粘贴/撤销/重做
                 </p>
               </div>
-              
 
+              <div className="mt-4 p-3 bg-white rounded-lg border border-gray-200">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-xs font-semibold text-gray-700">规则校验</h3>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowUnpowered((prev) => !prev)}
+                      className="text-[10px] px-2 py-0.5 rounded-full border border-gray-300 text-gray-600 hover:bg-gray-50"
+                    >
+                      {showUnpowered ? '隐藏未供电' : '显示未供电'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setValidationCollapsed((prev) => !prev)}
+                      className="text-[10px] px-2 py-0.5 rounded-full border border-gray-300 text-gray-600 hover:bg-gray-50"
+                    >
+                      {validationCollapsed ? '展开' : '折叠'}
+                    </button>
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                      validation.length === 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                    }`}>
+                      {validation.length === 0 ? '通过' : `${validation.length} 项`}
+                    </span>
+                  </div>
+                </div>
+                {validationCollapsed ? (
+                  <div className="text-xs text-gray-500">已折叠</div>
+                ) : validation.length === 0 ? (
+                  <div className="text-xs text-gray-500">未发现问题</div>
+                ) : (
+                  <ul className="space-y-1 text-xs text-red-600">
+                    {validation.slice(0, 6).map((issue) => (
+                      <li key={issue.id} className="flex items-start space-x-2">
+                        <span className="mt-1 h-1.5 w-1.5 rounded-full bg-red-500"></span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (issue.id.startsWith('edge:')) {
+                              const edgeId = issue.id.split(':')[1]
+                              selectEdgeById(edgeId)
+                              return
+                            }
+                            if (issue.id.startsWith('node:')) {
+                              const nodeId = issue.id.split(':')[1]
+                              selectNodeById(nodeId)
+                            }
+                          }}
+                          className="text-left hover:underline"
+                        >
+                          {issue.message}
+                        </button>
+                      </li>
+                    ))}
+                    {validation.length > 6 && (
+                      <li className="text-[10px] text-red-500">仅显示前 6 条，请调整后再查看。</li>
+                    )}
+                  </ul>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -1157,6 +1542,9 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
             onPaneClick={onPaneClick}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
+            onInit={setRfInstance}
+            onDrop={onDrop}
+            onDragOver={onDragOver}
             connectionMode={ConnectionMode.Loose}
             defaultEdgeOptions={{
               type: 'smoothstep',
@@ -1169,6 +1557,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                 targetOffsetY: 0,
                 controlOffsetY: 0,
                 isActive: false,
+                voltage: 380,
               } as EdgeControlData,
             }}
             fitView
@@ -1196,6 +1585,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                   switch: '#10b981',
                   load: '#8b5cf6',
                   bus: '#6366f1',
+                  transformer: '#f59e0b',
                 }
                 return colors[node.type || ''] || '#94a3b8'
               }}
@@ -1243,6 +1633,20 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                       <option value="off">断开</option>
                       <option value="on">闭合</option>
                     </select>
+                  </div>
+                )}
+
+                {selectedNode.type === 'switch' && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1.5">额定电流 (A)</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={5000}
+                      value={selectedNode.data?.ratedCurrent ?? 630}
+                      onChange={(e) => updateSelectedNodeData({ ratedCurrent: Number(e.target.value) || 630 })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                    />
                   </div>
                 )}
 
@@ -1326,6 +1730,44 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                     />
                   </div>
                 )}
+
+                {selectedNode.type === 'transformer' && (
+                  <>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1.5">变压器电压 (V)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={100000}
+                        value={selectedNode.data?.voltage ?? 380}
+                        onChange={(e) => updateSelectedNodeData({ voltage: Number(e.target.value) || 380 })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1.5">变比</label>
+                      <input
+                        type="number"
+                        min={0.01}
+                        step={0.01}
+                        value={selectedNode.data?.ratio ?? 1}
+                        onChange={(e) => updateSelectedNodeData({ ratio: Number(e.target.value) || 1 })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1.5">容量 (kVA)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={100000}
+                        value={selectedNode.data?.capacity ?? 1000}
+                        onChange={(e) => updateSelectedNodeData({ capacity: Number(e.target.value) || 1000 })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                      />
+                    </div>
+                  </>
+                )}
               </div>
 
               <p className="mt-4 text-xs text-gray-400">点击画布空白处取消选择</p>
@@ -1368,6 +1810,19 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                     />
                   </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1.5">电压等级 (V)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100000}
+                    value={Math.round(selectedEdgeData.voltage ?? 380)}
+                    onChange={(event) =>
+                      updateSelectedEdgeData({ voltage: Number(event.target.value) || 380 })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                  />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1.5">下横Y偏移</label>
@@ -1429,6 +1884,34 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
           onClose={() => setToast(null)}
         />
       )}
+
+      {previewDrawerOpen && (
+        <div className="fixed inset-0 z-50">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setPreviewDrawerOpen(false)}
+          />
+          <div className="absolute right-0 top-0 h-full w-[80vw] min-w-[420px] bg-white shadow-2xl flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+              <div className="text-sm font-semibold text-gray-800">模拟预览</div>
+              <button
+                onClick={() => setPreviewDrawerOpen(false)}
+                className="p-2 rounded-lg hover:bg-gray-100 transition"
+                aria-label="关闭预览"
+              >
+                <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <iframe
+              title="模拟预览"
+              src={`/grid/${params.id}/simulate`}
+              className="flex-1 w-full border-0"
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1439,12 +1922,14 @@ function ComponentButton({
   description,
   color = 'gray',
   onClick,
+  onDragStart,
 }: {
   icon: React.ReactNode
   label: string
   description?: string
   color?: string
   onClick: () => void
+  onDragStart?: (event: React.DragEvent) => void
 }) {
   const colorClasses: Record<string, string> = {
     blue: 'bg-blue-50 hover:bg-blue-100 border-blue-200 hover:border-blue-400 text-blue-600',
@@ -1463,6 +1948,8 @@ function ComponentButton({
   return (
     <button
       onClick={onClick}
+      draggable
+      onDragStart={onDragStart}
       className={`w-full text-left px-3 py-2.5 mb-2 rounded-lg border transition-all group ${colorClasses[color]}`}
     >
       <div className="flex items-start space-x-3">

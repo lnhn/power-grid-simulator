@@ -3,6 +3,8 @@ import { Handle, Position, NodeProps } from 'reactflow'
 
 export const SimulatePowerSourceNode = memo(({ data }: NodeProps) => {
   const isPowered = data.powered !== false
+  const portStatus = data.portStatus || {}
+  const bottomPowered = portStatus.bottom ?? isPowered
   
   return (
     <div className={`bg-gradient-to-br rounded-lg shadow-lg px-6 py-3 min-w-[200px] border-2 transition-all ${
@@ -40,7 +42,7 @@ export const SimulatePowerSourceNode = memo(({ data }: NodeProps) => {
       <Handle
         type="source"
         position={Position.Bottom}
-        className={`!w-4 !h-4 !border-2 !border-white ${isPowered ? '!bg-yellow-400' : '!bg-gray-400'}`}
+        className={`!w-4 !h-4 !border-2 !border-white ${bottomPowered ? '!bg-yellow-400' : '!bg-gray-400'}`}
         style={{ bottom: -8 }}
       />
     </div>

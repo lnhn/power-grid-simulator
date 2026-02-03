@@ -17,14 +17,17 @@ import { SimulatePowerSourceNode } from '@/components/nodes/SimulatePowerSourceN
 import { SimulateSwitchNode } from '@/components/nodes/SimulateSwitchNode'
 import { SimulateLoadNode } from '@/components/nodes/SimulateLoadNode'
 import { SimulateBusNode } from '@/components/nodes/SimulateBusNode'
+import { SimulateTransformerNode } from '@/components/nodes/SimulateTransformerNode'
 import { Toast } from '@/components/Toast'
 import { ConfirmModal } from '@/components/ConfirmModal'
+import { buildGridModels, GridSolver, voltageToColor } from '@/lib/grid'
 
 const nodeTypes = {
   powerSource: SimulatePowerSourceNode,
   switch: SimulateSwitchNode,
   load: SimulateLoadNode,
   bus: SimulateBusNode,
+  transformer: SimulateTransformerNode,
 }
 
 interface GridData {
@@ -73,6 +76,13 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
     return otherNode.position.x < tieNode.position.x ? `left-${kind}` : `right-${kind}`
   }, [])
 
+  const normalizeTieHandle = useCallback((handle: string | undefined, kind: 'source' | 'target') => {
+    if (!handle) return handle
+    if (kind === 'source' && handle.includes('target')) return handle.replace('target', 'source')
+    if (kind === 'target' && handle.includes('source')) return handle.replace('source', 'target')
+    return handle
+  }, [])
+
   useEffect(() => {
     if (status === 'unauthenticated') {
       router.push('/login')
@@ -118,10 +128,10 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
               const sourceIsTie = sourceNode?.type === 'switch' && sourceNode?.data?.subType === 'tie'
               const targetIsTie = targetNode?.type === 'switch' && targetNode?.data?.subType === 'tie'
               const inferredSourceHandle = sourceIsTie
-                ? inferTieHandle(sourceNode, targetNode, 'source')
+                ? (edge.sourceHandle ? normalizeTieHandle(edge.sourceHandle, 'source') : inferTieHandle(sourceNode, targetNode, 'source'))
                 : edge.sourceHandle
               const inferredTargetHandle = targetIsTie
-                ? inferTieHandle(targetNode, sourceNode, 'target')
+                ? (edge.targetHandle ? normalizeTieHandle(edge.targetHandle, 'target') : inferTieHandle(targetNode, sourceNode, 'target'))
                 : edge.targetHandle
               return {
                 ...edge,
@@ -228,6 +238,15 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
           : n
       )
     )
+    setTimeout(() => {
+      setNodes((current) => {
+        setEdges((currentEdges) => {
+          calculateCircuitState(current, currentEdges)
+          return currentEdges
+        })
+        return current
+      })
+    }, 100)
     // 操作完成后将当前状态写入数据库
     setTimeout(() => saveGridState(), 150)
   }
@@ -248,15 +267,21 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
         subType: node.data.subType,
         power: node.data.power,
         powered: node.data.powered,
+        ratio: node.data.ratio,
+        capacity: node.data.capacity,
+        ratedCurrent: node.data.ratedCurrent,
       },
     }))
     const cleanEdges = currentEdges.map((edge) => ({
       id: edge.id,
       source: edge.source,
       target: edge.target,
+      sourceHandle: edge.sourceHandle,
+      targetHandle: edge.targetHandle,
       type: edge.type,
       markerEnd: edge.markerEnd,
       style: edge.style,
+      data: edge.data,
     }))
     try {
       const res = await fetch(`/api/grids/${params.id}/state`, {
@@ -305,86 +330,49 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
   }
 
   const calculateCircuitState = (currentNodes: Node[], currentEdges: Edge[]) => {
-    const nodeMap = new Map(currentNodes.map(n => [n.id, n]))
-    const powered = new Set<string>()
-    
-    // 找到所有电源节点
-    const powerSources = currentNodes.filter(n => n.type === 'powerSource')
-    powerSources.forEach(ps => powered.add(ps.id))
-    
-    const isSwitchNode = (node?: Node) => node?.type === 'switch'
-    const isSwitchOn = (node?: Node) => !isSwitchNode(node) || node?.data?.status === 'on'
-    const isPassThrough = (node?: Node) => {
-      if (!node) return false
-      if (node.type === 'load') return false
-      if (node.type === 'switch') return node.data?.status === 'on'
-      return true
-    }
+    const { nodeModels, edgeModels } = buildGridModels(currentNodes, currentEdges)
+    const result = GridSolver.solve(nodeModels, edgeModels)
 
-    const adjacency = new Map<string, Set<string>>()
-    const addNeighbor = (a: string, b: string) => {
-      if (!adjacency.has(a)) adjacency.set(a, new Set())
-      adjacency.get(a)?.add(b)
-    }
-    currentEdges.forEach((edge) => {
-      addNeighbor(edge.source, edge.target)
-      addNeighbor(edge.target, edge.source)
-    })
-
-    // 广度优先搜索传递电力
-    let changed = true
-    let iterations = 0
-    while (changed && iterations < 100) {
-      changed = false
-      iterations++
-      
-      const queue: string[] = Array.from(powered)
-      const visited = new Set<string>(powered)
-      while (queue.length) {
-        const currentId = queue.shift() as string
-        const currentNode = nodeMap.get(currentId)
-        const neighbors = adjacency.get(currentId)
-        if (!neighbors) continue
-        if (!isPassThrough(currentNode)) continue
-
-        neighbors.forEach((neighborId) => {
-          if (visited.has(neighborId)) return
-          powered.add(neighborId)
-          visited.add(neighborId)
-          queue.push(neighborId)
-          changed = true
-        })
-      }
-    }
-    
-    // 更新节点状态
     setNodes((nds) =>
-      nds.map((node) => ({
-        ...node,
-        data: {
-          ...node.data,
-          powered: powered.has(node.id),
-          voltage: powered.has(node.id) ? (node.type === 'powerSource' ? 380 : 380) : 0,
-        },
-      }))
+      nds.map((node) => {
+        const powered = result.nodePowered.get(node.id) ?? false
+        const nodeState = result.nodeState.get(node.id)
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            powered,
+            nodeState,
+            voltage: powered ? (node.data?.voltage ?? (node.type === 'powerSource' ? 380 : 380)) : 0,
+            portStatus: result.portStatus.get(node.id),
+          },
+        }
+      })
     )
-    
-    // 更新边的动画
+
     setEdges((eds) =>
       eds.map((edge) => {
-        const sourceNode = nodeMap.get(edge.source)
-        const targetNode = nodeMap.get(edge.target)
-        const sourcePowered = powered.has(edge.source)
-        const targetPowered = powered.has(edge.target)
-        const isActive = sourcePowered && targetPowered
-        
+        const state = result.edgeStates.get(edge.id)
+        const active = state?.active ?? false
+        const flow = state?.flow ?? 'none'
+        const voltage = state?.voltage ?? 380
+        const flowClass =
+          flow === 'reverse' ? 'edge-flow-reverse' : flow === 'forward' ? 'edge-flow-forward' : ''
+        const stroke = active ? voltageToColor(voltage) : '#cbd5e1'
+
         return {
           ...edge,
-          animated: isActive,
+          animated: active,
+          className: [edge.className, flowClass].filter(Boolean).join(' '),
           style: {
             ...edge.style,
-            stroke: isActive ? '#3b82f6' : '#cbd5e1',
-            strokeWidth: isActive ? 3 : 2,
+            stroke,
+            strokeWidth: active ? 3 : 2,
+          },
+          data: {
+            ...edge.data,
+            flow,
+            voltage,
           },
         }
       })

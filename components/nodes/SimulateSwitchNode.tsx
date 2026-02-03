@@ -5,6 +5,12 @@ export const SimulateSwitchNode = memo(({ data, id }: NodeProps) => {
   const isOn = data.status === 'on'
   const isPowered = data.powered
   const isTie = data.subType === 'tie'
+  const portStatus = data.portStatus || {}
+  const topPowered = portStatus.top ?? isPowered
+  const bottomPowered = portStatus.bottom ?? isPowered
+  const leftPowered = portStatus.left ?? isPowered
+  const rightPowered = portStatus.right ?? isPowered
+  const nodeState = data.nodeState
   
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -54,10 +60,10 @@ export const SimulateSwitchNode = memo(({ data, id }: NodeProps) => {
           </div>
         </div>
         
-        {isPowered && isOn && (
+        {nodeState && (
           <div className="flex items-center space-x-1 px-2 py-1 bg-blue-100 rounded-full">
             <div className="w-1.5 h-1.5 rounded-full bg-blue-500 electricity-flow"></div>
-                <span className="text-xs font-medium text-blue-700">通电</span>
+                <span className="text-xs font-medium text-blue-700">闭合</span>
               </div>
         )}
       </div>
@@ -75,13 +81,13 @@ export const SimulateSwitchNode = memo(({ data, id }: NodeProps) => {
           <Handle
             type="target"
             position={Position.Top}
-            className={`!w-4 !h-4 !border-2 !border-white transition-colors ${isPowered ? '!bg-blue-500' : '!bg-gray-400'}`}
+            className={`!w-4 !h-4 !border-2 !border-white transition-colors ${topPowered ? '!bg-blue-500' : '!bg-gray-400'}`}
             style={{ top: -8, pointerEvents: 'none' }}
           />
           <Handle
             type="source"
             position={Position.Bottom}
-            className={`!w-4 !h-4 !border-2 !border-white transition-colors ${isPowered && isOn ? '!bg-blue-500' : '!bg-gray-400'}`}
+            className={`!w-4 !h-4 !border-2 !border-white transition-colors ${bottomPowered ? '!bg-blue-500' : '!bg-gray-400'}`}
             style={{ bottom: -8, pointerEvents: 'none' }}
           />
         </>
@@ -91,28 +97,28 @@ export const SimulateSwitchNode = memo(({ data, id }: NodeProps) => {
             id="left-target"
             type="target"
             position={Position.Left}
-            className={`!w-4 !h-4 !border-2 !border-white transition-colors ${isPowered ? '!bg-blue-500' : '!bg-gray-400'}`}
+            className={`!w-4 !h-4 !border-2 !border-white transition-colors ${leftPowered ? '!bg-blue-500' : '!bg-gray-400'}`}
             style={{ left: -8, pointerEvents: 'none' }}
           />
           <Handle
             id="left-source"
             type="source"
             position={Position.Left}
-            className={`!w-4 !h-4 !border-2 !border-white transition-colors ${isPowered && isOn ? '!bg-blue-500' : '!bg-gray-400'}`}
+            className={`!w-4 !h-4 !border-2 !border-white transition-colors ${leftPowered ? '!bg-blue-500' : '!bg-gray-400'}`}
             style={{ left: -8, pointerEvents: 'none' }}
           />
           <Handle
             id="right-target"
             type="target"
             position={Position.Right}
-            className={`!w-4 !h-4 !border-2 !border-white transition-colors ${isPowered ? '!bg-blue-500' : '!bg-gray-400'}`}
+            className={`!w-4 !h-4 !border-2 !border-white transition-colors ${rightPowered ? '!bg-blue-500' : '!bg-gray-400'}`}
             style={{ right: -8, pointerEvents: 'none' }}
           />
           <Handle
             id="right-source"
             type="source"
             position={Position.Right}
-            className={`!w-4 !h-4 !border-2 !border-white transition-colors ${isPowered && isOn ? '!bg-blue-500' : '!bg-gray-400'}`}
+            className={`!w-4 !h-4 !border-2 !border-white transition-colors ${rightPowered ? '!bg-blue-500' : '!bg-gray-400'}`}
             style={{ right: -8, pointerEvents: 'none' }}
           />
         </>

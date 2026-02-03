@@ -43,6 +43,22 @@ export default function DashboardPage() {
     }
   }
 
+  const handleDeleteGrid = async (grid: PowerGrid) => {
+    if (!confirm(`确认删除电网 "${grid.name}" 吗？此操作不可恢复。`)) return
+    try {
+      const res = await fetch(`/api/grids/${grid.id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        alert(`删除失败：${data.error || '未知错误'}`)
+        return
+      }
+      fetchGrids()
+    } catch (error) {
+      console.error('Failed to delete grid:', error)
+      alert('删除失败：网络错误')
+    }
+  }
+
 
 
   const handleLogout = async () => {
@@ -164,8 +180,20 @@ export default function DashboardPage() {
             {grids.map((grid) => (
               <div
                 key={grid.id}
-                className="bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-lg transition overflow-hidden flex flex-col h-full"
+                className="bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-lg transition overflow-hidden flex flex-col h-full relative"
               >
+                {isEngineer && (
+                  <button
+                    onClick={() => handleDeleteGrid(grid)}
+                    className="absolute top-3 right-3 p-2 rounded-lg bg-red-50 text-red-700 hover:bg-red-100 transition"
+                    title="删除电网"
+                    aria-label="删除电网"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                )}
                 <div className="p-6 flex-1 flex flex-col">
                   <h3 className="text-lg font-semibold text-gray-900 mb-2">{grid.name}</h3>
                   <p className="text-sm text-gray-600 mb-4 line-clamp-2 flex-1 min-h-[40px]">
@@ -183,12 +211,14 @@ export default function DashboardPage() {
                       模拟运行
                     </Link>
                     {isEngineer && (
-                      <Link
-                        href={`/grid/${grid.id}/edit`}
-                        className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition text-center"
-                      >
-                        编辑
-                      </Link>
+                      <>
+                        <Link
+                          href={`/grid/${grid.id}/edit`}
+                          className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition text-center"
+                        >
+                          编辑
+                        </Link>
+                      </>
                     )}
                   </div>
                 </div>
@@ -208,6 +238,7 @@ export default function DashboardPage() {
           }}
         />
       )}
+
       </main>
     </div>
   )

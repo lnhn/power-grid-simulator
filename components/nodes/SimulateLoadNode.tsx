@@ -4,6 +4,10 @@ import { Handle, Position, NodeProps } from 'reactflow'
 export const SimulateLoadNode = memo(({ data, id }: NodeProps) => {
   const isPowered = data.powered
   const isRunning = data.status === 'running'
+  const portStatus = data.portStatus || {}
+  const topPowered = portStatus.top ?? isPowered
+  const nodeState = data.nodeState
+  const displayRunning = Boolean(nodeState && topPowered)
   
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -56,7 +60,7 @@ export const SimulateLoadNode = memo(({ data, id }: NodeProps) => {
         )
       case 'mixer':
         return (
-          <svg className={`${iconClass} ${isRunning && isPowered ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className={`${iconClass} ${displayRunning ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
           </svg>
         )
@@ -82,8 +86,8 @@ export const SimulateLoadNode = memo(({ data, id }: NodeProps) => {
   }
 
   const getLoadColor = () => {
-    if (!isPowered) return 'from-gray-400 to-gray-500 border-gray-300'
-    if (!isRunning) return 'from-gray-500 to-gray-600 border-gray-400'
+    if (!topPowered) return 'from-gray-400 to-gray-500 border-gray-300'
+    if (!displayRunning) return 'from-gray-500 to-gray-600 border-gray-400'
     
     const colors: Record<string, string> = {
       pump: 'from-cyan-500 to-cyan-600 border-cyan-400 shadow-cyan-300/50',
@@ -107,10 +111,10 @@ export const SimulateLoadNode = memo(({ data, id }: NodeProps) => {
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-3">
           <div className={`bg-white/20 p-2 rounded-lg relative transition-all duration-300 ${
-            isRunning && isPowered ? 'animate-pulse' : ''
+            displayRunning ? 'animate-pulse' : ''
           }`}>
             {getLoadIcon()}
-            {isRunning && isPowered && (
+            {displayRunning && (
               <>
                 <div className="absolute -inset-1 bg-white rounded-lg opacity-20 animate-ping"></div>
                 <div className="absolute -inset-2 bg-white rounded-lg opacity-10 animate-pulse"></div>
@@ -132,15 +136,15 @@ export const SimulateLoadNode = memo(({ data, id }: NodeProps) => {
         </div>
         
         <div className={`px-2 py-1 rounded-full text-xs font-bold transition-all ${
-          isRunning && isPowered
+          displayRunning
             ? 'bg-green-400/40 text-white'
             : 'bg-gray-400/40 text-gray-200'
         }`}>
           <div className="flex items-center space-x-1">
             <div className={`w-1.5 h-1.5 rounded-full transition-all ${
-              isRunning && isPowered ? 'bg-green-300 animate-pulse' : 'bg-gray-300'
+              displayRunning ? 'bg-green-300 animate-pulse' : 'bg-gray-300'
             }`}></div>
-            <span>{isRunning ? '运行' : '停止'}</span>
+            <span>{displayRunning ? '运行' : '停止'}</span>
           </div>
         </div>
       </div>
@@ -148,7 +152,7 @@ export const SimulateLoadNode = memo(({ data, id }: NodeProps) => {
       <Handle
         type="target"
         position={Position.Top}
-        className={`!w-4 !h-4 !border-2 !border-white transition-colors ${isPowered ? '!bg-yellow-400' : '!bg-gray-400'}`}
+        className={`!w-4 !h-4 !border-2 !border-white transition-colors ${topPowered ? '!bg-yellow-400' : '!bg-gray-400'}`}
         style={{ top: -8, pointerEvents: 'none' }}
       />
     </div>

@@ -50,6 +50,22 @@ body {
   stroke: #3b82f6;
 }
 
+.react-flow__node.selected {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+  transform: scale(1.02);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.15);
+  z-index: 5;
+}
+
+.react-flow__edge.edge-flow-reverse .react-flow__edge-path {
+  animation-direction: reverse;
+}
+
+.react-flow__edge.edge-flow-forward .react-flow__edge-path {
+  animation-direction: normal;
+}
+
 /* 动画效果 */
 @keyframes pulse-electricity {
   0%, 100% {
