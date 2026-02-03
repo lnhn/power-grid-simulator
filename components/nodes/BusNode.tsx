@@ -34,20 +34,6 @@ export const BusNode = memo(({ data }: NodeProps) => {
         className="!bg-yellow-400 !w-4 !h-4 !border-2 !border-white"
         style={{ bottom: -8 }}
       />
-      {/* 左侧输出 */}
-      <Handle
-        type="source"
-        position={Position.Left}
-        className="!bg-yellow-400 !w-4 !h-4 !border-2 !border-white"
-        style={{ left: -8 }}
-      />
-      {/* 右侧输出 */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        className="!bg-yellow-400 !w-4 !h-4 !border-2 !border-white"
-        style={{ right: -8 }}
-      />
     </div>
   )
 })

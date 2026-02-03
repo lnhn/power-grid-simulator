@@ -32,11 +32,11 @@ export const NODE_RULES: Record<NodeType, NodeRule> = {
     computeNodeState: (status) => status.top,
   },
   bus: {
-    inputSides: ['top', 'bottom', 'left', 'right'],
-    outputSides: ['top', 'bottom', 'left', 'right'],
-    multiplicitySide: (side) => side,
-    computePowered: (status) => status.top || status.bottom || status.left || status.right,
-    computeNodeState: (status) => status.top || status.bottom || status.left || status.right,
+    inputSides: ['top'],
+    outputSides: ['bottom'],
+    multiplicitySide: () => 'top',
+    computePowered: (status) => status.top || status.bottom,
+    computeNodeState: (status) => status.top || status.bottom,
   },
   switch: {
     inputSides: ['top'],

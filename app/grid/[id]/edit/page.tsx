@@ -862,9 +862,13 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
         pump: '水泵',
         fan: '风机',
         compressor: '压缩机',
-        mixer: '搅拌机',
-        conveyor: '传送带',
         heater: '加热器',
+        oilPump: '油泵',
+        oilHeater: '油加热器',
+        electricHeatTracing: '电伴热',
+        expander: '膨胀机',
+        cryogenicPump: '低温泵',
+        other: '其他用电设备',
       }
       return loadLabels[subType || 'pump'] || '负载'
     }
@@ -877,9 +881,13 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
       pump: 75,
       fan: 55,
       compressor: 90,
-      mixer: 45,
-      conveyor: 30,
       heater: 100,
+      oilPump: 80,
+      oilHeater: 120,
+      electricHeatTracing: 40,
+      expander: 150,
+      cryogenicPump: 60,
+      other: 50,
     }
     return powers[subType || 'pump'] || 50
   }
@@ -1398,32 +1406,6 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
               <ComponentButton
                 icon={
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                }
-                label="搅拌机"
-                description="45kW 混料机"
-                color="pink"
-                onClick={() => addNode('load', 'mixer')}
-                onDragStart={handleDragStart('load', 'mixer')}
-              />
-              
-              <ComponentButton
-                icon={
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
-                  </svg>
-                }
-                label="传送带"
-                description="30kW 输送机"
-                color="amber"
-                onClick={() => addNode('load', 'conveyor')}
-                onDragStart={handleDragStart('load', 'conveyor')}
-              />
-              
-              <ComponentButton
-                icon={
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
                   </svg>
                 }
@@ -1432,6 +1414,84 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                 color="red"
                 onClick={() => addNode('load', 'heater')}
                 onDragStart={handleDragStart('load', 'heater')}
+              />
+              
+              <ComponentButton
+                icon={
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                }
+                label="油泵"
+                description="80kW 油路泵"
+                color="orange"
+                onClick={() => addNode('load', 'oilPump')}
+                onDragStart={handleDragStart('load', 'oilPump')}
+              />
+              
+              <ComponentButton
+                icon={
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
+                  </svg>
+                }
+                label="油加热器"
+                description="120kW 油加热"
+                color="rose"
+                onClick={() => addNode('load', 'oilHeater')}
+                onDragStart={handleDragStart('load', 'oilHeater')}
+              />
+              
+              <ComponentButton
+                icon={
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                }
+                label="电伴热"
+                description="40kW 伴热"
+                color="yellow"
+                onClick={() => addNode('load', 'electricHeatTracing')}
+                onDragStart={handleDragStart('load', 'electricHeatTracing')}
+              />
+              
+              <ComponentButton
+                icon={
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                }
+                label="膨胀机"
+                description="150kW 膨胀"
+                color="teal"
+                onClick={() => addNode('load', 'expander')}
+                onDragStart={handleDragStart('load', 'expander')}
+              />
+              
+              <ComponentButton
+                icon={
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                  </svg>
+                }
+                label="低温泵"
+                description="60kW 低温泵"
+                color="blue"
+                onClick={() => addNode('load', 'cryogenicPump')}
+                onDragStart={handleDragStart('load', 'cryogenicPump')}
+              />
+              
+              <ComponentButton
+                icon={
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                  </svg>
+                }
+                label="其他用电设备"
+                description="50kW 其他"
+                color="amber"
+                onClick={() => addNode('load', 'other')}
+                onDragStart={handleDragStart('load', 'other')}
               />
             </div>
 
@@ -1685,17 +1745,25 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                             pump: '水泵',
                             fan: '风机',
                             compressor: '压缩机',
-                            mixer: '搅拌机',
-                            conveyor: '传送带',
                             heater: '加热器',
+                            oilPump: '油泵',
+                            oilHeater: '油加热器',
+                            electricHeatTracing: '电伴热',
+                            expander: '膨胀机',
+                            cryogenicPump: '低温泵',
+                            other: '其他用电设备',
                           }
                           const powers: Record<string, number> = {
                             pump: 75,
                             fan: 55,
                             compressor: 90,
-                            mixer: 45,
-                            conveyor: 30,
                             heater: 100,
+                            oilPump: 80,
+                            oilHeater: 120,
+                            electricHeatTracing: 40,
+                            expander: 150,
+                            cryogenicPump: 60,
+                            other: 50,
                           }
                           updateSelectedNodeData({
                             subType,
@@ -1708,9 +1776,13 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                         <option value="pump">水泵</option>
                         <option value="fan">风机</option>
                         <option value="compressor">压缩机</option>
-                        <option value="mixer">搅拌机</option>
-                        <option value="conveyor">传送带</option>
                         <option value="heater">加热器</option>
+                        <option value="oilPump">油泵</option>
+                        <option value="oilHeater">油加热器</option>
+                        <option value="electricHeatTracing">电伴热</option>
+                        <option value="expander">膨胀机</option>
+                        <option value="cryogenicPump">低温泵</option>
+                        <option value="other">其他用电设备</option>
                       </select>
                     </div>
                   </>
@@ -1942,6 +2014,10 @@ function ComponentButton({
     pink: 'bg-pink-50 hover:bg-pink-100 border-pink-200 hover:border-pink-400 text-pink-600',
     amber: 'bg-amber-50 hover:bg-amber-100 border-amber-200 hover:border-amber-400 text-amber-600',
     red: 'bg-red-50 hover:bg-red-100 border-red-200 hover:border-red-400 text-red-600',
+    orange: 'bg-orange-50 hover:bg-orange-100 border-orange-200 hover:border-orange-400 text-orange-600',
+    rose: 'bg-rose-50 hover:bg-rose-100 border-rose-200 hover:border-rose-400 text-rose-600',
+    yellow: 'bg-yellow-50 hover:bg-yellow-100 border-yellow-200 hover:border-yellow-400 text-yellow-600',
+    teal: 'bg-teal-50 hover:bg-teal-100 border-teal-200 hover:border-teal-400 text-teal-600',
     gray: 'bg-gray-50 hover:bg-gray-100 border-gray-200 hover:border-gray-400 text-gray-600',
   }
   
