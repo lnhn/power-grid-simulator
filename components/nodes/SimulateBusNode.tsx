@@ -6,9 +6,11 @@ export const SimulateBusNode = memo(({ data }: NodeProps) => {
   const portStatus = data.portStatus || {}
   const topPowered = portStatus.top ?? isPowered
   const bottomPowered = portStatus.bottom ?? isPowered
+  const leftPowered = portStatus.left ?? isPowered
+  const rightPowered = portStatus.right ?? isPowered
   
   return (
-    <div className={`bg-gradient-to-br rounded-lg shadow-lg px-6 py-3 min-w-[200px] border-2 transition-all ${
+    <div className={`bg-gradient-to-br rounded-lg shadow-lg px-6 py-3 min-w-[240px] border-2 transition-all ${
       isPowered 
         ? 'from-indigo-500 to-indigo-600 border-indigo-400 shadow-indigo-300/50' 
         : 'from-gray-400 to-gray-500 border-gray-300'
@@ -22,10 +24,6 @@ export const SimulateBusNode = memo(({ data }: NodeProps) => {
           </div>
           <div>
             <div className="font-bold text-white text-sm">{data.label}</div>
-            <div className="text-xs text-white/90">
-              {isPowered && <span>{data.voltage || 380}V</span>}
-              {!isPowered && <span>配电母线</span>}
-            </div>
           </div>
         </div>
         <div className={`px-2 py-1 rounded-full text-xs font-bold ${
@@ -41,14 +39,30 @@ export const SimulateBusNode = memo(({ data }: NodeProps) => {
       <Handle
         type="target"
         position={Position.Top}
+        id="top-target"
         className={`!w-4 !h-4 !border-2 !border-white ${topPowered ? '!bg-yellow-400' : '!bg-gray-400'}`}
         style={{ top: -8 }}
       />
       <Handle
         type="source"
         position={Position.Bottom}
+        id="bottom-source"
         className={`!w-4 !h-4 !border-2 !border-white ${bottomPowered ? '!bg-yellow-400' : '!bg-gray-400'}`}
         style={{ bottom: -8 }}
+      />
+      <Handle
+        type="source"
+        position={Position.Left}
+        id="left-source"
+        className={`!w-4 !h-4 !border-2 !border-white ${leftPowered ? '!bg-yellow-400' : '!bg-gray-400'}`}
+        style={{ left: -8 }}
+      />
+      <Handle
+        type="source"
+        position={Position.Right}
+        id="right-source"
+        className={`!w-4 !h-4 !border-2 !border-white ${rightPowered ? '!bg-yellow-400' : '!bg-gray-400'}`}
+        style={{ right: -8 }}
       />
     </div>
   )

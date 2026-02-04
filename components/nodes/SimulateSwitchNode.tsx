@@ -34,7 +34,7 @@ export const SimulateSwitchNode = memo(({ data, id }: NodeProps) => {
   return (
     <div
       onClick={handleClick}
-      className={`bg-white rounded-lg shadow-lg px-6 py-3 min-w-[200px] border-2 cursor-pointer transition-all duration-300 ${
+      className={`relative bg-white rounded-lg shadow-lg px-6 py-3 min-w-[240px] border-2 cursor-pointer transition-all duration-300 ${
         isOn ? 'border-green-500 shadow-green-200' : 'border-red-500 shadow-red-200'
       }`}
       style={{ pointerEvents: 'all' }}
@@ -42,15 +42,12 @@ export const SimulateSwitchNode = memo(({ data, id }: NodeProps) => {
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-3">
           <div className={`p-2 rounded-lg transition-all duration-300 ${isOn ? 'bg-green-100' : 'bg-red-100'}`}>
-            {isOn ? (
-              <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            ) : (
-              <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            )}
+            <svg className={`w-5 h-5 ${isOn ? 'text-green-600' : 'text-red-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeWidth={1.8} strokeLinecap="round" d="M4 12h7m2 0h7" />
+              <path strokeWidth={1.8} strokeLinecap="round" d={isOn ? 'M11 12l-2-2M11 12l-2 2' : 'M11 12l-3-3M11 12l-3 3'} />
+              <circle cx="4" cy="12" r="1.2" strokeWidth={1.6} />
+              <circle cx="20" cy="12" r="1.2" strokeWidth={1.6} />
+            </svg>
           </div>
           <div>
             <div className="font-semibold text-gray-900 text-sm">{data.label}</div>
@@ -59,22 +56,20 @@ export const SimulateSwitchNode = memo(({ data, id }: NodeProps) => {
             </div>
           </div>
         </div>
-        
-        {nodeState && (
-          <div className="flex items-center space-x-1 px-2 py-1 bg-blue-100 rounded-full">
-            <div className="w-1.5 h-1.5 rounded-full bg-blue-500 electricity-flow"></div>
-                <span className="text-xs font-medium text-blue-700">闭合</span>
-              </div>
+        {isTie && (
+          <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+            母联
+          </span>
         )}
       </div>
 
-      {isTie && (
-        <div className="mt-2">
-          <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
-            母联（双向）
-          </span>
+      {nodeState && (
+        <div className="absolute top-2 right-2 flex items-center space-x-1 px-2 py-1 bg-blue-100 rounded-full">
+          <div className="w-1.5 h-1.5 rounded-full bg-blue-500 electricity-flow"></div>
+          <span className="text-xs font-medium text-blue-700">闭合</span>
         </div>
       )}
+
       
       {!isTie ? (
         <>

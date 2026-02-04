@@ -7,7 +7,7 @@ export const SimulatePowerSourceNode = memo(({ data }: NodeProps) => {
   const bottomPowered = portStatus.bottom ?? isPowered
   
   return (
-    <div className={`bg-gradient-to-br rounded-lg shadow-lg px-6 py-3 min-w-[200px] border-2 transition-all ${
+    <div className={`bg-gradient-to-br rounded-lg shadow-lg px-6 py-3 min-w-[240px] border-2 transition-all ${
       isPowered 
         ? 'from-blue-500 to-blue-600 border-blue-400 shadow-blue-300/50' 
         : 'from-gray-400 to-gray-500 border-gray-300'
@@ -24,9 +24,6 @@ export const SimulatePowerSourceNode = memo(({ data }: NodeProps) => {
           </div>
           <div>
             <div className="font-bold text-white text-sm">{data.label}</div>
-            <div className="text-xs text-white/90 font-medium">
-              {data.voltage || 380}V AC
-            </div>
           </div>
         </div>
         <div className={`px-2 py-1 rounded-full text-xs font-bold ${

@@ -9,7 +9,7 @@ export const SimulateTransformerNode = memo(({ data }: NodeProps) => {
   const nodeState = data.nodeState
 
   return (
-    <div className={`bg-gradient-to-br rounded-lg shadow-lg px-6 py-3 min-w-[220px] border-2 transition-all ${
+    <div className={`bg-gradient-to-br rounded-lg shadow-lg px-6 py-3 min-w-[240px] border-2 transition-all ${
       isPowered
         ? 'from-orange-500 to-orange-600 border-orange-400 shadow-orange-300/50'
         : 'from-gray-400 to-gray-500 border-gray-300'
@@ -18,14 +18,13 @@ export const SimulateTransformerNode = memo(({ data }: NodeProps) => {
         <div className="flex items-center space-x-3">
           <div className="bg-white/20 p-2 rounded-lg">
             <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v6m0 0l3-3m-3 3L9 6m9 6a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <rect x="3" y="6" width="6" height="12" rx="2" strokeWidth={1.8} />
+              <rect x="15" y="6" width="6" height="12" rx="2" strokeWidth={1.8} />
+              <path strokeWidth={1.8} strokeLinecap="round" d="M9 9h6M9 12h6M9 15h6" />
             </svg>
           </div>
           <div>
             <div className="font-bold text-white text-sm">{data.label}</div>
-            <div className="text-xs text-white/90">
-              {isPowered ? `${data.voltage || 380}V` : '变压器'}
-            </div>
           </div>
         </div>
         <div className={`px-2 py-1 rounded-full text-xs font-bold ${

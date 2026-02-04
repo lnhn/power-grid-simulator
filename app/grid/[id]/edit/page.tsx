@@ -293,10 +293,18 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
   const [showUnpowered, setShowUnpowered] = useState(true)
   const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null)
   const [previewDrawerOpen, setPreviewDrawerOpen] = useState(false)
+  const [contextMenu, setContextMenu] = useState<{
+    open: boolean
+    x: number
+    y: number
+    type: 'node' | 'edge' | 'pane'
+    nodeId?: string
+    edgeId?: string
+  }>({ open: false, x: 0, y: 0, type: 'pane' })
   const historyRef = useRef<{ nodes: Node[]; edges: Edge[] }[]>([])
   const historyIndexRef = useRef(-1)
   const isRestoringRef = useRef(false)
-  const clipboardRef = useRef<{ nodes: Node[]; edges: Edge[] } | null>(null)
+  const clipboardRef = useRef<{ nodes: Node[]; edges: Edge[]; mode: 'copy' | 'cut' } | null>(null)
   const historyTimerRef = useRef<number | null>(null)
   const nodesRef = useRef<Node[]>([])
   const edgesRef = useRef<Edge[]>([])
@@ -339,26 +347,79 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
     restoreHistory(historyIndexRef.current + 1)
   }, [restoreHistory])
 
+  const deleteSelectedElements = useCallback(() => {
+    setNodes((nds) => {
+      const nextNodes = nds.filter((node) => !node.selected)
+      const selectedNodeIds = new Set(nds.filter((node) => node.selected).map((node) => node.id))
+      setEdges((eds) => {
+        const nextEdges = eds.filter(
+          (edge) => !edge.selected && !selectedNodeIds.has(edge.source) && !selectedNodeIds.has(edge.target)
+        )
+        pushHistory(nextNodes, nextEdges)
+        return nextEdges
+      })
+      return nextNodes
+    })
+  }, [setNodes, setEdges, pushHistory])
+
   const handleCopy = useCallback(() => {
     const selectedNodes = nodes.filter((node) => node.selected)
-    if (selectedNodes.length === 0) return
-    const selectedNodeIds = new Set(selectedNodes.map((node) => node.id))
-    const selectedEdges = edges.filter(
-      (edge) => selectedNodeIds.has(edge.source) && selectedNodeIds.has(edge.target)
-    )
+    const selectedEdges = edges.filter((edge) => edge.selected)
+    if (selectedNodes.length === 0 && selectedEdges.length === 0) return
+    let nodesToCopy: Node[] = []
+    let edgesToCopy: Edge[] = []
+
+    if (selectedNodes.length > 0) {
+      const selectedNodeIds = new Set(selectedNodes.map((node) => node.id))
+      edgesToCopy = edges.filter(
+        (edge) => selectedNodeIds.has(edge.source) && selectedNodeIds.has(edge.target)
+      )
+      nodesToCopy = selectedNodes
+    } else {
+      edgesToCopy = selectedEdges
+    }
+
     clipboardRef.current = {
-      nodes: JSON.parse(JSON.stringify(selectedNodes)) as Node[],
-      edges: JSON.parse(JSON.stringify(selectedEdges)) as Edge[],
+      nodes: JSON.parse(JSON.stringify(nodesToCopy)) as Node[],
+      edges: JSON.parse(JSON.stringify(edgesToCopy)) as Edge[],
+      mode: 'copy',
     }
   }, [nodes, edges])
 
+  const handleCut = useCallback(() => {
+    const selectedNodes = nodes.filter((node) => node.selected)
+    const selectedEdges = edges.filter((edge) => edge.selected)
+    if (selectedNodes.length === 0 && selectedEdges.length === 0) return
+    let nodesToCopy: Node[] = []
+    let edgesToCopy: Edge[] = []
+
+    if (selectedNodes.length > 0) {
+      const selectedNodeIds = new Set(selectedNodes.map((node) => node.id))
+      edgesToCopy = edges.filter(
+        (edge) => selectedNodeIds.has(edge.source) && selectedNodeIds.has(edge.target)
+      )
+      nodesToCopy = selectedNodes
+    } else {
+      edgesToCopy = selectedEdges
+    }
+
+    clipboardRef.current = {
+      nodes: JSON.parse(JSON.stringify(nodesToCopy)) as Node[],
+      edges: JSON.parse(JSON.stringify(edgesToCopy)) as Edge[],
+      mode: 'cut',
+    }
+    deleteSelectedElements()
+  }, [nodes, edges, deleteSelectedElements])
+
   const handlePaste = useCallback(() => {
     if (!clipboardRef.current) return
-    const { nodes: copiedNodes, edges: copiedEdges } = clipboardRef.current
+    const { nodes: copiedNodes, edges: copiedEdges, mode } = clipboardRef.current
     const idMap = new Map<string, string>()
-    const offset = 30
+    const offset = mode === 'copy' ? 30 : 0
+    const hasNodes = copiedNodes.length > 0
+
     const newNodes = copiedNodes.map((node, index) => {
-      const newId = `${node.id}_copy_${Date.now()}_${index}`
+      const newId = mode === 'cut' ? node.id : `${node.id}_copy_${Date.now()}_${index}`
       idMap.set(node.id, newId)
       return {
         ...node,
@@ -369,18 +430,31 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
     })
     const newEdges = copiedEdges.map((edge, index) => ({
       ...edge,
-      id: `${edge.id}_copy_${Date.now()}_${index}`,
+      id: mode === 'cut' ? edge.id : `${edge.id}_copy_${Date.now()}_${index}`,
       source: idMap.get(edge.source) || edge.source,
       target: idMap.get(edge.target) || edge.target,
       selected: false,
     }))
-    setNodes((nds) => {
-      const next = nds.map((node) => ({ ...node, selected: false })).concat(newNodes)
-      pushHistory(next, edges.concat(newEdges))
-      return next
-    })
-    setEdges((eds) => eds.concat(newEdges))
-  }, [edges, pushHistory, setNodes, setEdges])
+
+    if (hasNodes) {
+      setNodes((nds) => {
+        const next = nds.map((node) => ({ ...node, selected: false })).concat(newNodes)
+        pushHistory(next, edges.concat(newEdges))
+        return next
+      })
+      setEdges((eds) => eds.concat(newEdges))
+    } else {
+      setEdges((eds) => {
+        const next = eds.map((edge) => ({ ...edge, selected: false })).concat(newEdges)
+        pushHistory(nodes, next)
+        return next
+      })
+    }
+
+    if (mode === 'cut') {
+      clipboardRef.current = null
+    }
+  }, [edges, nodes, pushHistory, setNodes, setEdges])
 
   useEffect(() => {
     if (historyIndexRef.current === -1) {
@@ -545,6 +619,21 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
     setSelectedEdge(null)
   }, [setEdges])
 
+  const deleteNodeById = useCallback(
+    (nodeId: string) => {
+      setNodes((nds) => {
+        const nextNodes = nds.filter((node) => node.id !== nodeId)
+        setEdges((eds) => {
+          const nextEdges = eds.filter((edge) => edge.source !== nodeId && edge.target !== nodeId)
+          pushHistory(nextNodes, nextEdges)
+          return nextEdges
+        })
+        return nextNodes
+      })
+    },
+    [setNodes, setEdges, pushHistory]
+  )
+
   const selectNodeById = useCallback((nodeId: string) => {
     setNodes((nds) =>
       nds.map((node) => ({
@@ -585,6 +674,66 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
     const nextEdge = edges.find((edge) => edge.id === edgeId) ?? null
     setSelectedEdge(nextEdge)
   }, [setEdges, setNodes, edges])
+
+  const nodesWithHandlers = useMemo(
+    () =>
+      nodes.map((node) => ({
+        ...node,
+        data: {
+          ...node.data,
+          onDelete: () => deleteNodeById(node.id),
+        },
+      })),
+    [nodes, deleteNodeById]
+  )
+
+  const openContextMenu = useCallback(
+    (
+      event: React.MouseEvent,
+      type: 'node' | 'edge' | 'pane',
+      target?: { nodeId?: string; edgeId?: string }
+    ) => {
+      event.preventDefault()
+      event.stopPropagation()
+      if (type === 'pane' && !clipboardRef.current) {
+        return
+      }
+      if (type === 'node' && target?.nodeId) {
+        selectNodeById(target.nodeId)
+      } else if (type === 'edge' && target?.edgeId) {
+        selectEdgeById(target.edgeId)
+      } else {
+        onPaneClick()
+      }
+      setContextMenu({
+        open: true,
+        x: event.clientX,
+        y: event.clientY,
+        type,
+        nodeId: target?.nodeId,
+        edgeId: target?.edgeId,
+      })
+    },
+    [onPaneClick, selectEdgeById, selectNodeById]
+  )
+
+  useEffect(() => {
+    if (!contextMenu.open) return
+    const hasSelection = nodes.some((node) => node.selected) || edges.some((edge) => edge.selected)
+    const canPaste = Boolean(clipboardRef.current)
+    const hasItems = (contextMenu.type !== 'pane' && hasSelection) || canPaste
+    if (!hasItems) {
+      setContextMenu((prev) => ({ ...prev, open: false }))
+      return
+    }
+    const close = () => setContextMenu((prev) => ({ ...prev, open: false }))
+    window.addEventListener('click', close)
+    window.addEventListener('resize', close)
+    return () => {
+      window.removeEventListener('click', close)
+      window.removeEventListener('resize', close)
+    }
+  }, [contextMenu.open, contextMenu.type, nodes, edges])
 
 
 
@@ -892,6 +1041,107 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
     return powers[subType || 'pump'] || 50
   }
 
+  const renderLoadPaletteIcon = (subType: string) => {
+    const iconClass = 'w-5 h-5'
+    const common = {
+      fill: 'none',
+      stroke: 'currentColor',
+      strokeWidth: 1.8,
+      strokeLinecap: 'round',
+      strokeLinejoin: 'round',
+      viewBox: '0 0 24 24',
+    } as const
+
+    switch (subType) {
+      case 'pump':
+        return (
+          <svg className={iconClass} {...common}>
+            <circle cx="9" cy="12" r="3.5" />
+            <circle cx="9" cy="12" r="1.4" />
+            <path d="M12.5 12H19m0 0v-3m0 3v3" />
+            <path d="M6.5 6h5" />
+          </svg>
+        )
+      case 'fan':
+        return (
+          <svg className={iconClass} {...common}>
+            <circle cx="12" cy="12" r="2" />
+            <path d="M12 4a4 4 0 013.5 6l-3.5 2" />
+            <path d="M20 12a4 4 0 01-6 3.5l-2-3.5" />
+            <path d="M12 20a4 4 0 01-3.5-6l3.5-2" />
+          </svg>
+        )
+      case 'compressor':
+        return (
+          <svg className={iconClass} {...common}>
+            <rect x="4" y="9" width="12" height="6" rx="3" />
+            <path d="M16 12h4m-2-3v6" />
+            <path d="M6 7v2m6-2v2" />
+          </svg>
+        )
+      case 'heater':
+        return (
+          <svg className={iconClass} {...common}>
+            <path d="M12 4c2 2 3 4 3 6a3 3 0 11-6 0c0-2 1-4 3-6z" />
+            <path d="M8 18h8" />
+          </svg>
+        )
+      case 'oilPump':
+        return (
+          <svg className={iconClass} {...common}>
+            <path d="M16 4c1 2-1 4-2 5-1-1-3-3-2-5 1-2 3-2 4 0z" />
+            <rect x="4" y="10" width="8" height="8" rx="2" />
+            <circle cx="8" cy="14" r="2" />
+            <path d="M12 14h5m0 0v-3m0 3v3" />
+          </svg>
+        )
+      case 'oilHeater':
+        return (
+          <svg className={iconClass} {...common}>
+            <path d="M15.5 5c1.5 2 1.2 4.2-.4 6-1.6 1.8-2.1 3-2.1 5" />
+            <path d="M10 6c1.2 1.6 1.1 3.2-.1 4.6-1.2 1.4-1.6 2.3-1.6 4.4" />
+            <path d="M6 18h12" />
+            <path d="M12 4c.8.8 1.2 1.8 1.2 2.8" />
+            <path d="M16 4c1 2-1 4-2 5-1-1-3-3-2-5 1-2 3-2 4 0z" />
+          </svg>
+        )
+      case 'electricHeatTracing':
+        return (
+          <svg className={iconClass} {...common}>
+            <path d="M4 12c2-2 4-2 6 0s4 2 6 0 4-2 4-2" />
+            <path d="M5 7v3m14-3v3" />
+            <rect x="4" y="5" width="2" height="2" />
+            <rect x="18" y="5" width="2" height="2" />
+          </svg>
+        )
+      case 'expander':
+        return (
+          <svg className={iconClass} {...common}>
+            <circle cx="12" cy="12" r="3" />
+            <path d="M12 3v6M12 15v6M3 12h6M15 12h6" />
+            <path d="M6 6l4 4m8-4-4 4m0 4 4 4m-8-4-4 4" />
+          </svg>
+        )
+      case 'cryogenicPump':
+        return (
+          <svg className={iconClass} {...common}>
+            <rect x="4" y="9" width="8" height="8" rx="2" />
+            <circle cx="8" cy="13" r="2" />
+            <path d="M12 13h5m0 0v-3m0 3v3" />
+            <path d="M17 5l1.5 1.5M17 5l-1.5 1.5M17 9l1.5-1.5M17 9l-1.5-1.5" />
+          </svg>
+        )
+      default:
+        return (
+          <svg className={iconClass} {...common}>
+            <circle cx="12" cy="12" r="3" />
+            <path d="M12 3v3M12 18v3M3 12h3M18 12h3" />
+            <path d="M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2" />
+          </svg>
+        )
+    }
+  }
+
   const onDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault()
     event.dataTransfer.dropEffect = 'move'
@@ -1021,21 +1271,6 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
     },
     [baseOnEdgesChange, scheduleHistoryPush]
   )
-
-  const deleteSelectedElements = useCallback(() => {
-    setNodes((nds) => {
-      const nextNodes = nds.filter((node) => !node.selected)
-      const selectedNodeIds = new Set(nds.filter((node) => node.selected).map((node) => node.id))
-      setEdges((eds) => {
-        const nextEdges = eds.filter(
-          (edge) => !edge.selected && !selectedNodeIds.has(edge.source) && !selectedNodeIds.has(edge.target)
-        )
-        pushHistory(nextNodes, nextEdges)
-        return nextEdges
-      })
-      return nextNodes
-    })
-  }, [setNodes, setEdges])
 
   // 对齐功能
   const alignNodes = useCallback((direction: 'left' | 'right' | 'top' | 'bottom' | 'center-h' | 'center-v') => {
@@ -1200,6 +1435,11 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
         handleCopy()
         return
       }
+      if (isMeta && event.key.toLowerCase() === 'x') {
+        event.preventDefault()
+        handleCut()
+        return
+      }
       if (isMeta && event.key.toLowerCase() === 'v') {
         event.preventDefault()
         handlePaste()
@@ -1211,7 +1451,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [deleteSelectedElements, handleUndo, handleRedo, handleCopy, handlePaste])
+  }, [deleteSelectedElements, handleUndo, handleRedo, handleCopy, handleCut, handlePaste])
 
   if (status === 'loading' || loading) {
     return (
@@ -1253,6 +1493,32 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
           </div>
           
           <div className="flex items-center space-x-3">
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={handleCopy}
+                className="px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 transition"
+              >
+                复制
+              </button>
+              <button
+                onClick={handleCut}
+                className="px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 transition"
+              >
+                剪切
+              </button>
+              <button
+                onClick={handlePaste}
+                className="px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 transition"
+              >
+                粘贴
+              </button>
+              <button
+                onClick={deleteSelectedElements}
+                className="px-3 py-2 text-sm rounded-lg border border-red-200 text-red-700 hover:bg-red-50 transition"
+              >
+                删除
+              </button>
+            </div>
             <button
               onClick={handleSave}
               disabled={saving}
@@ -1323,7 +1589,10 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
               <ComponentButton
                 icon={
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 7h12M6 17h12M9 7v10m6-10v10" />
+                    <path strokeWidth={1.8} strokeLinecap="round" d="M4 12h7m2 0h7" />
+                    <path strokeWidth={1.8} strokeLinecap="round" d="M11 12l-2-2M11 12l-2 2" />
+                    <circle cx="4" cy="12" r="1.2" strokeWidth={1.6} />
+                    <circle cx="20" cy="12" r="1.2" strokeWidth={1.6} />
                   </svg>
                 }
                 label="母联"
@@ -1349,7 +1618,9 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
               <ComponentButton
                 icon={
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v6m0 0l3-3m-3 3L9 6m9 6a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    <rect x="3" y="6" width="6" height="12" rx="2" strokeWidth={1.8} />
+                    <rect x="15" y="6" width="6" height="12" rx="2" strokeWidth={1.8} />
+                    <path strokeWidth={1.8} strokeLinecap="round" d="M9 9h6M9 12h6M9 15h6" />
                   </svg>
                 }
                 label="变压器"
@@ -1365,11 +1636,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
               <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">用电设备</h3>
               
               <ComponentButton
-                icon={
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-                  </svg>
-                }
+                icon={renderLoadPaletteIcon('pump')}
                 label="水泵"
                 description="75kW 离心泵"
                 color="cyan"
@@ -1378,11 +1645,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
               />
               
               <ComponentButton
-                icon={
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                }
+                icon={renderLoadPaletteIcon('fan')}
                 label="风机"
                 description="55kW 轴流风机"
                 color="sky"
@@ -1391,11 +1654,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
               />
               
               <ComponentButton
-                icon={
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
-                  </svg>
-                }
+                icon={renderLoadPaletteIcon('compressor')}
                 label="压缩机"
                 description="90kW 空压机"
                 color="purple"
@@ -1404,11 +1663,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
               />
               
               <ComponentButton
-                icon={
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
-                  </svg>
-                }
+                icon={renderLoadPaletteIcon('heater')}
                 label="加热器"
                 description="100kW 电加热"
                 color="red"
@@ -1417,11 +1672,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
               />
               
               <ComponentButton
-                icon={
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                }
+                icon={renderLoadPaletteIcon('oilPump')}
                 label="油泵"
                 description="80kW 油路泵"
                 color="orange"
@@ -1430,11 +1681,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
               />
               
               <ComponentButton
-                icon={
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
-                  </svg>
-                }
+                icon={renderLoadPaletteIcon('oilHeater')}
                 label="油加热器"
                 description="120kW 油加热"
                 color="rose"
@@ -1443,11 +1690,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
               />
               
               <ComponentButton
-                icon={
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
-                }
+                icon={renderLoadPaletteIcon('electricHeatTracing')}
                 label="电伴热"
                 description="40kW 伴热"
                 color="yellow"
@@ -1456,11 +1699,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
               />
               
               <ComponentButton
-                icon={
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                }
+                icon={renderLoadPaletteIcon('expander')}
                 label="膨胀机"
                 description="150kW 膨胀"
                 color="teal"
@@ -1469,11 +1708,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
               />
               
               <ComponentButton
-                icon={
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-                  </svg>
-                }
+                icon={renderLoadPaletteIcon('cryogenicPump')}
                 label="低温泵"
                 description="60kW 低温泵"
                 color="blue"
@@ -1482,11 +1717,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
               />
               
               <ComponentButton
-                icon={
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                  </svg>
-                }
+                icon={renderLoadPaletteIcon('other')}
                 label="其他用电设备"
                 description="50kW 其他"
                 color="amber"
@@ -1593,13 +1824,16 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
         {/* 右侧画布 */}
         <div className="flex-1" ref={reactFlowWrapper}>
           <ReactFlow
-            nodes={nodes}
+            nodes={nodesWithHandlers}
             edges={edges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             onEdgeClick={onEdgeClick}
             onPaneClick={onPaneClick}
+            onNodeContextMenu={(event, node) => openContextMenu(event, 'node', { nodeId: node.id })}
+            onEdgeContextMenu={(event, edge) => openContextMenu(event, 'edge', { edgeId: edge.id })}
+            onPaneContextMenu={(event) => openContextMenu(event, 'pane')}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
             onInit={setRfInstance}
@@ -1955,6 +2189,39 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
           type={toast.type}
           onClose={() => setToast(null)}
         />
+      )}
+
+      {contextMenu.open && (
+        <div
+          className="fixed z-[200] min-w-[160px] rounded-lg border border-gray-200 bg-white shadow-lg overflow-hidden"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          {(() => {
+            const hasSelection = nodes.some((node) => node.selected) || edges.some((edge) => edge.selected)
+            const canPaste = Boolean(clipboardRef.current)
+            const items = [
+              { label: '复制', show: contextMenu.type !== 'pane' && hasSelection, onClick: handleCopy },
+              { label: '剪切', show: contextMenu.type !== 'pane' && hasSelection, onClick: handleCut },
+              { label: '粘贴', show: canPaste, onClick: handlePaste },
+              { label: '删除', show: contextMenu.type !== 'pane' && hasSelection, onClick: deleteSelectedElements },
+            ]
+            return items
+              .filter((item) => item.show)
+              .map((item) => (
+                <button
+                  key={item.label}
+                  onClick={() => {
+                    item.onClick()
+                    setContextMenu((prev) => ({ ...prev, open: false }))
+                  }}
+                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  {item.label}
+                </button>
+              ))
+          })()}
+        </div>
       )}
 
       {previewDrawerOpen && (

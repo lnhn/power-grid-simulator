@@ -1,9 +1,11 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useSession } from 'next-auth/react'
+import { useSession, signOut } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { ConfirmModal } from '@/components/ConfirmModal'
+import { Toast } from '@/components/Toast'
 
 interface PowerGrid {
   id: string
@@ -20,6 +22,20 @@ export default function DashboardPage() {
   const [grids, setGrids] = useState<PowerGrid[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null)
+  const [confirmModal, setConfirmModal] = useState<{
+    open: boolean
+    title: string
+    message: string
+    confirmText?: string
+    variant?: 'default' | 'danger'
+    onConfirm: () => void
+  }>({
+    open: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+  })
 
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -43,26 +59,35 @@ export default function DashboardPage() {
     }
   }
 
-  const handleDeleteGrid = async (grid: PowerGrid) => {
-    if (!confirm(`确认删除电网 "${grid.name}" 吗？此操作不可恢复。`)) return
+  const deleteGrid = async (grid: PowerGrid) => {
     try {
       const res = await fetch(`/api/grids/${grid.id}`, { method: 'DELETE' })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        alert(`删除失败：${data.error || '未知错误'}`)
+        setToast({ message: `删除失败：${data.error || '未知错误'}`, type: 'error' })
         return
       }
       fetchGrids()
     } catch (error) {
       console.error('Failed to delete grid:', error)
-      alert('删除失败：网络错误')
+      setToast({ message: '删除失败：网络错误', type: 'error' })
     }
+  }
+  const handleDeleteGrid = (grid: PowerGrid) => {
+    setConfirmModal({
+      open: true,
+      title: '确认删除电网',
+      message: `确认删除电网 "${grid.name}" 吗？\n此操作不可恢复。`,
+      confirmText: '删除',
+      variant: 'danger',
+      onConfirm: () => deleteGrid(grid),
+    })
   }
 
 
 
   const handleLogout = async () => {
-    router.push('/api/auth/signout')
+    await signOut({ callbackUrl: '/login' })
   }
 
   if (status === 'loading' || loading) {
@@ -238,6 +263,23 @@ export default function DashboardPage() {
           }}
         />
       )}
+
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
+      <ConfirmModal
+        open={confirmModal.open}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        confirmText={confirmModal.confirmText}
+        variant={confirmModal.variant}
+        onConfirm={confirmModal.onConfirm}
+        onCancel={() => setConfirmModal((prev) => ({ ...prev, open: false }))}
+      />
 
       </main>
     </div>

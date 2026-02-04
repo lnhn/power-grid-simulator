@@ -1,73 +1,104 @@
 import { memo } from 'react'
 import { Handle, Position, NodeProps } from 'reactflow'
 
-export const LoadNode = memo(({ data }: NodeProps) => {
+export const LoadNode = memo(({ data, selected }: NodeProps) => {
   const getLoadIcon = () => {
+    const iconClass = 'w-5 h-5 text-white'
+    const common = {
+      fill: 'none',
+      stroke: 'currentColor',
+      strokeWidth: 1.8,
+      strokeLinecap: 'round',
+      strokeLinejoin: 'round',
+      viewBox: '0 0 24 24',
+    } as const
+
     switch (data.subType) {
       case 'pump':
         return (
-          <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+          <svg className={iconClass} {...common}>
+            <circle cx="9" cy="12" r="3.5" />
+            <circle cx="9" cy="12" r="1.4" />
+            <path d="M12.5 12H19m0 0v-3m0 3v3" />
+            <path d="M6.5 6h5" />
           </svg>
         )
       case 'fan':
         return (
-          <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          <svg className={iconClass} {...common}>
+            <circle cx="12" cy="12" r="2" />
+            <path d="M12 4a4 4 0 013.5 6l-3.5 2" />
+            <path d="M20 12a4 4 0 01-6 3.5l-2-3.5" />
+            <path d="M12 20a4 4 0 01-3.5-6l3.5-2" />
           </svg>
         )
       case 'compressor':
         return (
-          <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+          <svg className={iconClass} {...common}>
+            <rect x="4" y="9" width="12" height="6" rx="3" />
+            <path d="M16 12h4m-2-3v6" />
+            <path d="M6 7v2m6-2v2" />
           </svg>
         )
       case 'heater':
         return (
-          <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
+          <svg className={iconClass} {...common}>
+            <path d="M12 4c2 2 3 4 3 6a3 3 0 11-6 0c0-2 1-4 3-6z" />
+            <path d="M8 18h8" />
           </svg>
         )
       case 'oilPump':
         return (
-          <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          <svg className={iconClass} {...common}>
+            <path d="M16 4c1 2-1 4-2 5-1-1-3-3-2-5 1-2 3-2 4 0z" />
+            <rect x="4" y="10" width="8" height="8" rx="2" />
+            <circle cx="8" cy="14" r="2" />
+            <path d="M12 14h5m0 0v-3m0 3v3" />
           </svg>
         )
       case 'oilHeater':
         return (
-          <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
+          <svg className={iconClass} {...common}>
+            <path d="M15.5 5c1.5 2 1.2 4.2-.4 6-1.6 1.8-2.1 3-2.1 5" />
+            <path d="M10 6c1.2 1.6 1.1 3.2-.1 4.6-1.2 1.4-1.6 2.3-1.6 4.4" />
+            <path d="M6 18h12" />
+            <path d="M12 4c.8.8 1.2 1.8 1.2 2.8" />
+            <path d="M16 4c1 2-1 4-2 5-1-1-3-3-2-5 1-2 3-2 4 0z" />
           </svg>
         )
       case 'electricHeatTracing':
         return (
-          <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+          <svg className={iconClass} {...common}>
+            <path d="M4 12c2-2 4-2 6 0s4 2 6 0 4-2 4-2" />
+            <path d="M5 7v3m14-3v3" />
+            <rect x="4" y="5" width="2" height="2" />
+            <rect x="18" y="5" width="2" height="2" />
           </svg>
         )
       case 'expander':
         return (
-          <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          <svg className={iconClass} {...common}>
+            <circle cx="12" cy="12" r="3" />
+            <path d="M12 3v6M12 15v6M3 12h6M15 12h6" />
+            <path d="M6 6l4 4m8-4-4 4m0 4 4 4m-8-4-4 4" />
           </svg>
         )
       case 'cryogenicPump':
         return (
-          <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+          <svg className={iconClass} {...common}>
+            <rect x="4" y="9" width="8" height="8" rx="2" />
+            <circle cx="8" cy="13" r="2" />
+            <path d="M12 13h5m0 0v-3m0 3v3" />
+            <path d="M17 5l1.5 1.5M17 5l-1.5 1.5M17 9l1.5-1.5M17 9l-1.5-1.5" />
           </svg>
         )
       case 'other':
-        return (
-          <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-          </svg>
-        )
       default:
         return (
-          <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+          <svg className={iconClass} {...common}>
+            <circle cx="12" cy="12" r="3" />
+            <path d="M12 3v3M12 18v3M3 12h3M18 12h3" />
+            <path d="M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2" />
           </svg>
         )
     }
@@ -90,7 +121,20 @@ export const LoadNode = memo(({ data }: NodeProps) => {
   }
 
   return (
-    <div className={`bg-gradient-to-br ${getLoadColor()} rounded-lg shadow-lg px-6 py-3 min-w-[220px] border-2`}>
+    <div className={`relative bg-gradient-to-br ${getLoadColor()} rounded-lg shadow-lg px-6 py-3 min-w-[240px] border-2`}>
+      {selected && (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation()
+            data?.onDelete?.()
+          }}
+          className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-white text-gray-700 border border-gray-200 shadow hover:bg-gray-50"
+          aria-label="删除节点"
+        >
+          ×
+        </button>
+      )}
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-3">
           <div className="bg-white/20 p-2 rounded-lg">
@@ -98,9 +142,6 @@ export const LoadNode = memo(({ data }: NodeProps) => {
           </div>
           <div>
             <div className="font-bold text-white text-sm">{data.label}</div>
-            <div className="text-xs text-white/90">
-              {data.power || 50}kW
-            </div>
           </div>
         </div>
       </div>

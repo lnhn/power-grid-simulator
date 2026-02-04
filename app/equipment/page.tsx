@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useSession } from 'next-auth/react'
+import { useSession, signOut } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 
@@ -84,7 +84,7 @@ export default function EquipmentPage() {
     )
   }
 
-  const handleLogout = () => router.push('/api/auth/signout')
+  const handleLogout = () => signOut({ callbackUrl: '/login' })
   const isEngineer = session?.user?.role === 'ENGINEER'
 
   return (

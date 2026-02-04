@@ -1,9 +1,22 @@
 import { memo } from 'react'
 import { Handle, Position, NodeProps } from 'reactflow'
 
-export const PowerSourceNode = memo(({ data }: NodeProps) => {
+export const PowerSourceNode = memo(({ data, selected }: NodeProps) => {
   return (
-    <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg shadow-lg px-6 py-3 min-w-[200px] border-2 border-blue-400">
+    <div className="relative bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg shadow-lg px-6 py-3 min-w-[240px] border-2 border-blue-400">
+      {selected && (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation()
+            data?.onDelete?.()
+          }}
+          className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-white text-gray-700 border border-gray-200 shadow hover:bg-gray-50"
+          aria-label="删除节点"
+        >
+          ×
+        </button>
+      )}
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-3">
           <div className="bg-white/20 p-2 rounded-lg">
@@ -13,9 +26,6 @@ export const PowerSourceNode = memo(({ data }: NodeProps) => {
           </div>
           <div>
             <div className="font-bold text-white text-sm">{data.label}</div>
-            <div className="text-xs text-blue-100 font-medium">
-              {data.voltage || 380}V AC
-            </div>
           </div>
         </div>
       </div>

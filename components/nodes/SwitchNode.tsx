@@ -1,26 +1,36 @@
 import { memo } from 'react'
 import { Handle, Position, NodeProps } from 'reactflow'
 
-export const SwitchNode = memo(({ data }: NodeProps) => {
+export const SwitchNode = memo(({ data, selected }: NodeProps) => {
   const isOn = data.status === 'on'
   const isTie = data.subType === 'tie'
   
   return (
-    <div className={`bg-white rounded-lg shadow-lg px-6 py-3 min-w-[200px] border-2 transition-all ${
+    <div className={`relative bg-white rounded-lg shadow-lg px-6 py-3 min-w-[240px] border-2 transition-all ${
       isOn ? 'border-green-500 shadow-green-200' : 'border-gray-300'
     }`}>
+      {selected && (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation()
+            data?.onDelete?.()
+          }}
+          className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-white text-gray-700 border border-gray-200 shadow hover:bg-gray-50"
+          aria-label="删除节点"
+        >
+          ×
+        </button>
+      )}
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-3">
           <div className={`p-2 rounded-lg ${isOn ? 'bg-green-100' : 'bg-gray-100'}`}>
-            {isOn ? (
-              <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            ) : (
-              <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            )}
+            <svg className={`w-5 h-5 ${isOn ? 'text-green-600' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeWidth={1.8} strokeLinecap="round" d="M4 12h7m2 0h7" />
+              <path strokeWidth={1.8} strokeLinecap="round" d={isOn ? 'M11 12l-2-2M11 12l-2 2' : 'M11 12l-3-3M11 12l-3 3'} />
+              <circle cx="4" cy="12" r="1.2" strokeWidth={1.6} />
+              <circle cx="20" cy="12" r="1.2" strokeWidth={1.6} />
+            </svg>
           </div>
           <div>
             <div className="font-semibold text-gray-900 text-sm">{data.label}</div>
