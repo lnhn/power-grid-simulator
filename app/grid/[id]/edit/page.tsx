@@ -254,7 +254,7 @@ import { SwitchNode } from '@/components/nodes/SwitchNode'
 import { LoadNode } from '@/components/nodes/LoadNode'
 import { BusNode } from '@/components/nodes/BusNode'
 import { TransformerNode } from '@/components/nodes/TransformerNode'
-import { buildGridModels, GridSolver, NodeModel } from '@/lib/grid'
+import { buildGridModels, GridSolver, NodeModel, inferSide, inferTieHandle, normalizeTieHandle } from '@/lib/grid'
 import { Toast } from '@/components/Toast'
 
 const nodeTypes = {
@@ -268,8 +268,6 @@ const nodeTypes = {
 const edgeTypes = {
   smoothstep: UpdatableEdge,
 }
-
-type Side = 'top' | 'bottom' | 'left' | 'right'
 
 interface GridData {
   id: string
@@ -471,58 +469,6 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
       pushHistory(nodesRef.current, edgesRef.current)
     }, 250)
   }, [pushHistory])
-
-  const inferTieHandle = useCallback((tieNode: Node | undefined, otherNode: Node | undefined, kind: 'source' | 'target') => {
-    if (!tieNode || !otherNode) return undefined
-    return otherNode.position.x < tieNode.position.x ? `left-${kind}` : `right-${kind}`
-  }, [])
-
-  const normalizeTieHandle = useCallback((handle: string | undefined, kind: 'source' | 'target') => {
-    if (!handle) return handle
-    if (kind === 'source' && handle.includes('target')) return handle.replace('target', 'source')
-    if (kind === 'target' && handle.includes('source')) return handle.replace('source', 'target')
-    return handle
-  }, [])
-
-  const inferSide = useCallback(
-    (nodeId: string, edge: Edge, isSource: boolean, nodeMap: Map<string, Node>): Side => {
-      const node = nodeMap.get(nodeId)
-      const otherId = isSource ? edge.target : edge.source
-      const other = nodeMap.get(otherId)
-
-      if (node?.type === 'switch' && node?.data?.subType === 'tie') {
-        if (other && other.position.x < node.position.x) return 'left'
-        if (other) return 'right'
-        return 'left'
-      }
-
-      const handle = isSource ? edge.sourceHandle : edge.targetHandle
-      if (handle?.includes('left')) return 'left'
-      if (handle?.includes('right')) return 'right'
-      if (handle?.includes('top')) return 'top'
-      if (handle?.includes('bottom')) return 'bottom'
-
-      if (node?.type === 'switch') {
-        if (other && other.position.y < node.position.y) return 'top'
-        return 'bottom'
-      }
-
-      if (node?.type === 'powerSource') return 'bottom'
-      if (node?.type === 'load') return 'top'
-
-      if (node?.type === 'bus') {
-        if (other) {
-          if (other.position.x < node.position.x) return 'left'
-          if (other.position.x > node.position.x) return 'right'
-          if (other.position.y < node.position.y) return 'top'
-        }
-        return 'bottom'
-      }
-
-      return isSource ? 'bottom' : 'top'
-    },
-    []
-  )
 
   const toNodeModel = useCallback((node: Node) => {
     return new NodeModel(
@@ -745,9 +691,11 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
     }
   }, [status, session, router])
 
+  // 会话就绪后才请求，未登录时不发起必然 401 的请求
   useEffect(() => {
+    if (status === 'loading' || status === 'unauthenticated') return
     fetchGrid()
-  }, [params.id])
+  }, [params.id, status])
 
   useEffect(() => {
     if (!selectedEdge) return
@@ -755,7 +703,8 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
     setSelectedEdge(latestEdge)
   }, [edges, selectedEdge])
 
-  const validation = useMemo(() => {
+  // 校验为纯计算（含一次整图求解），仅在节点/连线变化后防抖执行，避免拖拽时每帧求解
+  const computeValidation = useCallback(() => {
     const issues: { id: string; message: string }[] = []
     if (nodes.length === 0) return issues
     const nodeMap = new Map(nodes.map((node) => [node.id, node]))
@@ -812,7 +761,14 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
     })
 
     return issues
-  }, [nodes, edges, inferSide, toNodeModel, showUnpowered])
+  }, [nodes, edges, toNodeModel, showUnpowered])
+
+  const [validation, setValidation] = useState<{ id: string; message: string }[]>([])
+
+  useEffect(() => {
+    const timer = setTimeout(() => setValidation(computeValidation()), 250)
+    return () => clearTimeout(timer)
+  }, [computeValidation])
 
   const fetchGrid = async () => {
     try {
@@ -821,15 +777,6 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
       setGrid(data)
       setGridName(data.name || '')
       
-      console.log('Fetched grid data:', {
-        id: data.id,
-        name: data.name,
-        nodesType: typeof data.nodes,
-        edgesType: typeof data.edges,
-        nodesLength: data.nodes?.length,
-        edgesLength: data.edges?.length,
-      })
-      
       // 安全解析 JSON，确保返回数组
       let parsedNodes = []
       let parsedEdges = []
@@ -837,7 +784,6 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
       try {
         const nodesData = typeof data.nodes === 'string' ? JSON.parse(data.nodes) : data.nodes
         parsedNodes = Array.isArray(nodesData) ? nodesData : []
-        console.log('Parsed nodes:', parsedNodes.length)
       } catch (e) {
         console.error('Failed to parse nodes:', e)
         console.error('Nodes data:', data.nodes)
@@ -881,7 +827,6 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
               }
             })
           : []
-        console.log('Parsed edges:', parsedEdges.length)
       } catch (e) {
         console.error('Failed to parse edges:', e)
         console.error('Edges data:', data.edges)
@@ -967,7 +912,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
         return next
       })
     },
-    [setEdges, nodes, inferTieHandle]
+    [setEdges, nodes]
   )
 
   const addNode = (type: string, subType?: string, position?: { x: number; y: number }) => {
@@ -1220,9 +1165,6 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
         })
       })
 
-      console.log('Saving nodes:', cleanNodes.length)
-      console.log('Saving edges:', cleanEdges.length)
-
       const response = await fetch(`/api/grids/${params.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -1234,8 +1176,6 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
       })
 
       if (response.ok) {
-        const savedData = await response.json()
-        console.log('Saved successfully:', savedData)
         setToast({ message: '保存成功！', type: 'success' })
       } else {
         const errorData = await response.json().catch(() => ({}))

@@ -1,15 +1,13 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
+import { authOptions, requireRole } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(authOptions)
-    
-    if (!session) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    const denied = requireRole(session, ['ENGINEER', 'OPERATOR'])
+    if (denied) return denied
 
     const { gridId, action, targetId, details } = await request.json()
 
@@ -22,7 +20,7 @@ export async function POST(request: Request) {
 
     const log = await prisma.operationLog.create({
       data: {
-        userId: session.user.id,
+        userId: session!.user.id,
         gridId,
         action,
         targetId,
@@ -39,29 +37,36 @@ export async function POST(request: Request) {
 export async function GET(request: Request) {
   try {
     const session = await getServerSession(authOptions)
-    
-    if (!session) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    const denied = requireRole(session, ['ENGINEER', 'OPERATOR'])
+    if (denied) return denied
 
     const { searchParams } = new URL(request.url)
     const gridId = searchParams.get('gridId')
 
-    const logs = await prisma.operationLog.findMany({
-      where: gridId ? { gridId } : undefined,
-      include: {
-        user: {
-          select: {
-            username: true,
-            role: true,
+    // 分页参数：页码从 1 开始，每页最大 100 条，避免无上限查询
+    const page = Math.max(1, Number(searchParams.get('page')) || 1)
+    const pageSize = Math.min(100, Math.max(1, Number(searchParams.get('pageSize')) || 20))
+    const where = gridId ? { gridId } : undefined
+
+    const [logs, total] = await Promise.all([
+      prisma.operationLog.findMany({
+        where,
+        include: {
+          user: {
+            select: {
+              username: true,
+              role: true,
+            },
           },
         },
-      },
-      orderBy: { timestamp: 'desc' },
-      take: 100,
-    })
+        orderBy: { timestamp: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      prisma.operationLog.count({ where }),
+    ])
 
-    return NextResponse.json(logs)
+    return NextResponse.json({ logs, total, page, pageSize })
   } catch (error) {
     return NextResponse.json({ error: 'Failed to fetch logs' }, { status: 500 })
   }

@@ -10,7 +10,6 @@ export const SimulateSwitchNode = memo(({ data, id }: NodeProps) => {
   const bottomPowered = portStatus.bottom ?? isPowered
   const leftPowered = portStatus.left ?? isPowered
   const rightPowered = portStatus.right ?? isPowered
-  const nodeState = data.nodeState
   
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -63,12 +62,6 @@ export const SimulateSwitchNode = memo(({ data, id }: NodeProps) => {
         )}
       </div>
 
-      {nodeState && (
-        <div className="absolute top-2 right-2 flex items-center space-x-1 px-2 py-1 bg-blue-100 rounded-full">
-          <div className="w-1.5 h-1.5 rounded-full bg-blue-500 electricity-flow"></div>
-          <span className="text-xs font-medium text-blue-700">闭合</span>
-        </div>
-      )}
 
       
       {!isTie ? (

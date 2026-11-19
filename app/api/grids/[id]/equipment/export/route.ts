@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
+import { authOptions, requireRole } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 
 /** 导出该电网的设备清单（保存时已自动同步，与电网一致） */
@@ -10,9 +10,8 @@ export async function GET(
 ) {
   try {
     const session = await getServerSession(authOptions)
-    if (!session) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    const denied = requireRole(session, ['ENGINEER', 'OPERATOR'])
+    if (denied) return denied
 
     const { searchParams } = new URL(request.url)
     const format = searchParams.get('format') || 'json'

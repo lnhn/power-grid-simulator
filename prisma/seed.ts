@@ -4,8 +4,9 @@ import bcrypt from 'bcryptjs'
 const prisma = new PrismaClient()
 
 async function main() {
-  // 创建测试用户
-  const hashedPassword = await bcrypt.hash('password', 10)
+  // 创建测试用户：密码来自环境变量，避免在源码与日志中固化明文口令
+  const seedPassword = process.env.SEED_PASSWORD ?? 'password'
+  const hashedPassword = await bcrypt.hash(seedPassword, 10)
 
   const engineer = await prisma.user.upsert({
     where: { username: 'engineer' },
@@ -160,10 +161,9 @@ async function main() {
     },
   })
 
+  // 不打印明文口令，仅记录创建结果
   console.log('数据库初始化完成!')
-  console.log('创建的用户:')
-  console.log('  工程师 - 用户名: engineer, 密码: password')
-  console.log('  操作员 - 用户名: operator, 密码: password')
+  console.log(`创建的用户: ${engineer.username}(${engineer.role}), ${operator.username}(${operator.role})`)
   console.log('创建的示例电网:', sampleGrid.name)
 }
 

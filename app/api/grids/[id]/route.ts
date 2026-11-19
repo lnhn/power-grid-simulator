@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
+import { authOptions, requireRole } from '@/lib/auth'
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 
 export async function GET(
@@ -34,10 +35,8 @@ export async function PUT(
 ) {
   try {
     const session = await getServerSession(authOptions)
-    
-    if (!session || session.user.role !== 'ENGINEER') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    const denied = requireRole(session, ['ENGINEER'])
+    if (denied) return denied
 
     const { nodes, edges, name, description } = await request.json()
 
@@ -50,38 +49,40 @@ export async function PUT(
     }
     if (description !== undefined) updateData.description = description
 
-    const grid = await prisma.powerGrid.update({
-      where: { id: params.id },
-      data: updateData,
-    })
-
-    // 保存电网时自动同步设备清单（与电网节点一致）
+    // 电网更新与设备清单同步在同一事务内完成，保证数据一致性
+    const equipmentData: Prisma.EquipmentCreateManyInput[] = []
     if (nodes !== undefined) {
-      try {
-        const parsed = typeof nodes === 'string' ? JSON.parse(nodes) : nodes
-        const list = Array.isArray(parsed) ? parsed : []
-        await prisma.equipment.deleteMany({ where: { gridId: params.id } })
-        for (const node of list) {
-          const d = node.data || {}
-          await prisma.equipment.create({
-            data: {
-              gridId: params.id,
-              nodeId: node.id || '',
-              name: d.label || node.type || '未命名',
-              type: node.type || 'bus',
-              subType: d.subType || null,
-              power: d.power != null ? Number(d.power) : null,
-              voltage: d.voltage != null ? Number(d.voltage) : null,
-              current: d.current != null ? Number(d.current) : null,
-              description: null,
-              specs: null,
-            },
-          })
-        }
-      } catch (e) {
-        console.error('Sync equipment error:', e)
+      const parsed = typeof nodes === 'string' ? JSON.parse(nodes) : nodes
+      const list = Array.isArray(parsed) ? parsed : []
+      for (const node of list) {
+        const d = node.data || {}
+        equipmentData.push({
+          gridId: params.id,
+          nodeId: node.id || '',
+          name: d.label || node.type || '未命名',
+          type: node.type || 'bus',
+          subType: d.subType || null,
+          power: d.power != null ? Number(d.power) : null,
+          voltage: d.voltage != null ? Number(d.voltage) : null,
+          current: d.current != null ? Number(d.current) : null,
+          description: null,
+          specs: null,
+        })
       }
     }
+
+    const [grid] = await prisma.$transaction([
+      prisma.powerGrid.update({
+        where: { id: params.id },
+        data: updateData,
+      }),
+      ...(nodes !== undefined
+        ? [
+            prisma.equipment.deleteMany({ where: { gridId: params.id } }),
+            prisma.equipment.createMany({ data: equipmentData }),
+          ]
+        : []),
+    ])
 
     return NextResponse.json(grid)
   } catch (error) {
@@ -96,10 +97,8 @@ export async function DELETE(
 ) {
   try {
     const session = await getServerSession(authOptions)
-    
-    if (!session || session.user.role !== 'ENGINEER') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    const denied = requireRole(session, ['ENGINEER'])
+    if (denied) return denied
 
     await prisma.$transaction([
       prisma.operationLog.deleteMany({

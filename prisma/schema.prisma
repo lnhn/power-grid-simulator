@@ -42,6 +42,8 @@ model OperationLog {
   targetId    String    // 被操作的元件ID
   timestamp   DateTime  @default(now())
   details     String?   // 额外的操作详情
+
+  @@index([gridId])
 }
 
 // 设备清单：由电网保存时自动从画布节点同步，与电网一致，便于导出
@@ -51,7 +53,7 @@ model Equipment {
   grid        PowerGrid @relation(fields: [gridId], references: [id], onDelete: Cascade)
   nodeId      String    // 画布节点 ID，与电网 nodes 一致
   name        String    // 设备名称/标签
-  type        String    // powerSource | switch | load | bus
+  type        String    // powerSource | switch | load | bus | transformer
   subType     String?   // 负载子类型: pump | fan | compressor | mixer | conveyor | heater
   power       Float?    // 功率 kW
   voltage     Float?    // 电压 V

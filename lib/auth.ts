@@ -1,7 +1,22 @@
-import { NextAuthOptions } from 'next-auth'
+import { NextAuthOptions, Session } from 'next-auth'
 import CredentialsProvider from 'next-auth/providers/credentials'
+import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import bcrypt from 'bcryptjs'
+
+/**
+ * API 角色校验：未登录返回 401，角色不符返回 403。
+ * 校验通过返回 null，调用方可直接 `return denied`。
+ */
+export function requireRole(session: Session | null, roles: string[]): NextResponse | null {
+  if (!session) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  if (!roles.includes(session.user.role)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  return null
+}
 
 export const authOptions: NextAuthOptions = {
   providers: [

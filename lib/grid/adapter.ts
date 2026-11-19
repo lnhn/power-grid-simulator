@@ -3,7 +3,24 @@ import { EdgeModel } from './models/EdgeModel'
 import { NodeModel, NodeType } from './models/NodeModel'
 import { Side } from './models/PortModel'
 
-const inferSide = (nodeId: string, edge: Edge, isSource: boolean, nodeMap: Map<string, Node>): Side => {
+/**
+ * tie 开关只有左右两个端口，handle 名由两端节点的相对位置推断。
+ */
+export const inferTieHandle = (tieNode: Node | undefined, otherNode: Node | undefined, kind: 'source' | 'target') => {
+  if (!tieNode || !otherNode) return undefined
+  return otherNode.position.x < tieNode.position.x ? `left-${kind}` : `right-${kind}`
+}
+
+/** handle 名与边的 source/target 方向不一致时（连线方向反向）修正为当前方向。 */
+export const normalizeTieHandle = (handle: string | undefined, kind: 'source' | 'target') => {
+  if (!handle) return handle
+  if (kind === 'source' && handle.includes('target')) return handle.replace('target', 'source')
+  if (kind === 'target' && handle.includes('source')) return handle.replace('source', 'target')
+  return handle
+}
+
+/** 根据 handle 名（或几何位置）推断边连接的是节点的哪个端口。 */
+export const inferSide = (nodeId: string, edge: Edge, isSource: boolean, nodeMap: Map<string, Node>): Side => {
   const node = nodeMap.get(nodeId)
   const otherId = isSource ? edge.target : edge.source
   const other = nodeMap.get(otherId)

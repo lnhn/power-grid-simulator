@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSession, signOut } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -31,6 +31,9 @@ export default function LogsPage() {
   const [grids, setGrids] = useState<PowerGrid[]>([])
   const [logs, setLogs] = useState<OperationLog[]>([])
   const [loading, setLoading] = useState(true)
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const pageSize = 20
 
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -38,12 +41,7 @@ export default function LogsPage() {
     }
   }, [status, router])
 
-  useEffect(() => {
-    fetchGrids()
-    fetchLogs()
-  }, [])
-
-  const fetchGrids = async () => {
+  const fetchGrids = useCallback(async () => {
     try {
       const res = await fetch('/api/grids')
       const data = await res.json()
@@ -51,25 +49,47 @@ export default function LogsPage() {
     } catch (error) {
       console.error('Failed to fetch grids:', error)
     }
-  }
+  }, [])
 
-  const fetchLogs = async () => {
+  const fetchLogs = useCallback(async (targetPage: number) => {
     try {
-      const res = await fetch('/api/logs')
+      setLoading(true)
+      const res = await fetch(`/api/logs?page=${targetPage}&pageSize=${pageSize}`)
       const data = await res.json()
-      setLogs(Array.isArray(data) ? data : [])
-      setLoading(false)
+      // 接口返回 { logs, total, page, pageSize }，兼容旧的数组格式
+      const pageLogs = Array.isArray(data) ? data : (Array.isArray(data.logs) ? data.logs : [])
+      setLogs(pageLogs)
+      setTotal(Array.isArray(data) ? pageLogs.length : data.total ?? 0)
     } catch (error) {
       console.error('Failed to fetch logs:', error)
+    } finally {
       setLoading(false)
     }
+  }, [])
+
+  // 依赖 session：会话就绪后才请求，避免未登录时发起无效请求
+  useEffect(() => {
+    if (status === 'unauthenticated') return
+    fetchGrids()
+    fetchLogs(page)
+  }, [status, page, fetchGrids, fetchLogs])
+
+  // 电网名称索引：避免逐条日志线性查找
+  const gridMap = useMemo(() => new Map(grids.map(g => [g.id, g])), [grids])
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+
+  const gotoPage = (next: number) => {
+    if (next < 1 || next > totalPages || next === page) return
+    setPage(next)
   }
 
   const handleLogout = async () => {
     await signOut({ callbackUrl: '/login' })
   }
 
-  if (status === 'loading' || loading) {
+  // 首次加载显示整页 spinner，翻页时保留表格并只让分页按钮失效
+  if (status === 'loading' || (loading && logs.length === 0)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
@@ -174,7 +194,7 @@ export default function LogsPage() {
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {logs.map((log) => {
-                      const grid = grids.find(g => g.id === log.gridId)
+                      const grid = gridMap.get(log.gridId)
                       return (
                         <tr key={log.id} className="hover:bg-gray-50">
                           <td className="py-3 px-4 text-gray-600 whitespace-nowrap">
@@ -201,6 +221,29 @@ export default function LogsPage() {
                     })}
                   </tbody>
                 </table>
+              </div>
+
+              {/* 分页控件 */}
+              <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 bg-gray-50 text-sm">
+                <span className="text-gray-600">
+                  共 {total} 条，第 {page} / {totalPages} 页
+                </span>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => gotoPage(page - 1)}
+                    disabled={page <= 1 || loading}
+                    className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    上一页
+                  </button>
+                  <button
+                    onClick={() => gotoPage(page + 1)}
+                    disabled={page >= totalPages || loading}
+                    className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    下一页
+                  </button>
+                </div>
               </div>
             </div>
           )}

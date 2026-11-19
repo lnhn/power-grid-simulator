@@ -1,4 +1,4 @@
-export { buildGridModels } from './adapter'
+export { buildGridModels, inferSide, inferTieHandle, normalizeTieHandle } from './adapter'
 export { GridSolver, voltageToColor } from './engine/GridSolver'
 export { EdgeModel } from './models/EdgeModel'
 export { NodeModel } from './models/NodeModel'

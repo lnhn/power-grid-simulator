@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useSession, signOut } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -34,6 +34,7 @@ const typeLabels: Record<string, string> = {
   switch: '断路器',
   load: '负载',
   bus: '母线',
+  transformer: '变压器',
 }
 
 export default function EquipmentPage() {
@@ -47,11 +48,7 @@ export default function EquipmentPage() {
     if (status === 'unauthenticated') router.push('/login')
   }, [status, router])
 
-  useEffect(() => {
-    fetchGrids()
-  }, [])
-
-  const fetchGrids = async () => {
+  const fetchGrids = useCallback(async () => {
     try {
       const res = await fetch('/api/grids')
       const data = await res.json()
@@ -61,7 +58,13 @@ export default function EquipmentPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
+
+  // 会话就绪后才请求，未登录时不发起无效请求
+  useEffect(() => {
+    if (status === 'unauthenticated') return
+    fetchGrids()
+  }, [status, fetchGrids])
 
   const openGrid = async (id: string) => {
     try {

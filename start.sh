@@ -15,7 +15,7 @@ if [ ! -f "prisma/dev.db" ]; then
     npx prisma db push
     
     echo "📝 填充初始数据..."
-    npx tsx prisma/seed.ts
+    npm run seed
 fi
 
 echo "✨ 启动开发服务器..."

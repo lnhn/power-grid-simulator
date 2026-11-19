@@ -10,6 +10,10 @@ export type EdgeState = {
   active: boolean
   flow: FlowDirection
   voltage: number
+  /** 环网交叉边（不属于 BFS 生成树） */
+  loop: boolean
+  /** 两端来自不同电源且源电压不一致 */
+  conflict: boolean
 }
 
 export type GridSolveResult = {
@@ -18,6 +22,10 @@ export type GridSolveResult = {
   portStatus: Map<string, Record<Side, boolean>>
   edgeStates: Map<string, EdgeState>
   distance: Map<string, number>
+  /** 多源电压冲突的端口 id */
+  voltageConflict: Set<string>
+  /** 环网交叉边 id */
+  loopEdges: Set<string>
 }
 
 export const voltageToColor = (voltage: number) => {
@@ -33,6 +41,16 @@ export class GridSolver {
     const graph = new GridGraph(nodes, edges)
     const distance = new Map<string, number>()
     const queue: string[] = []
+    /** 端口 -> 供电来源电源 id */
+    const sourceOf = new Map<string, string>()
+    /** 端口 -> 来源电源电压 */
+    const sourceVoltageOf = new Map<string, number>()
+    /** 端口 -> BFS 生成树边 id（源端口为 undefined） */
+    const treeEdge = new Map<string, string | undefined>()
+    const voltageConflict = new Set<string>()
+    const loopEdges = new Set<string>()
+
+    const nodeOfPort = (portId: string) => graph.nodes.get(portId.split(':')[0])
 
     nodes
       .filter((node) => node.type === 'powerSource')
@@ -40,6 +58,9 @@ export class GridSolver {
         const portId = `${node.id}:bottom`
         if (distance.has(portId)) return
         distance.set(portId, 0)
+        sourceOf.set(portId, node.id)
+        sourceVoltageOf.set(portId, (node.data as { voltage?: number }).voltage ?? 380)
+        treeEdge.set(portId, undefined)
         queue.push(portId)
       })
 
@@ -49,8 +70,31 @@ export class GridSolver {
       const neighbors = graph.adjacency.get(current)
       if (!neighbors) continue
       neighbors.forEach((neighbor) => {
-        if (distance.has(neighbor)) return
+        const edgeId = graph.adjacencyEdge.get(current)?.get(neighbor)
+
+        if (distance.has(neighbor)) {
+          // 已访问：若该邻接不是任一端的生成树边，则为环网交叉边
+          if (edgeId !== undefined && treeEdge.get(neighbor) !== edgeId && treeEdge.get(current) !== edgeId) {
+            loopEdges.add(edgeId)
+          }
+          // 多源电压冲突：不同电源且源电压不同（变压器属合法变压，排除）
+          const srcA = sourceOf.get(current)
+          const srcB = sourceOf.get(neighbor)
+          if (srcA && srcB && srcA !== srcB) {
+            if (nodeOfPort(current)?.type !== 'transformer' && nodeOfPort(neighbor)?.type !== 'transformer') {
+              if (sourceVoltageOf.get(current) !== sourceVoltageOf.get(neighbor)) {
+                voltageConflict.add(current)
+                voltageConflict.add(neighbor)
+              }
+            }
+          }
+          return
+        }
+
         distance.set(neighbor, base + 1)
+        sourceOf.set(neighbor, sourceOf.get(current)!)
+        sourceVoltageOf.set(neighbor, sourceVoltageOf.get(current)!)
+        treeEdge.set(neighbor, edgeId)
         queue.push(neighbor)
       })
     }
@@ -79,6 +123,7 @@ export class GridSolver {
       const active = sourcePowered || targetPowered
       const sourceDist = distance.get(edge.sourcePortId)
       const targetDist = distance.get(edge.targetPortId)
+      const loop = loopEdges.has(edge.id)
       let flow: FlowDirection = 'none'
 
       if (active) {
@@ -87,15 +132,9 @@ export class GridSolver {
         } else if (targetPowered && !sourcePowered) {
           flow = 'reverse'
         } else if (sourceDist !== undefined && targetDist !== undefined) {
+          // 环网交叉边等距时流向无法由单一电源判定
           if (sourceDist < targetDist) flow = 'forward'
           else if (targetDist < sourceDist) flow = 'reverse'
-          else flow = edge.sourcePortId < edge.targetPortId ? 'forward' : 'reverse'
-        } else if (sourceDist !== undefined) {
-          flow = 'forward'
-        } else if (targetDist !== undefined) {
-          flow = 'reverse'
-        } else {
-          flow = edge.sourcePortId < edge.targetPortId ? 'forward' : 'reverse'
         }
       }
 
@@ -107,20 +146,15 @@ export class GridSolver {
         const targetNode = graph.nodes.get(targetNodeId)
         const sourceVoltage = sourceNode?.data.voltage
         const targetVoltage = targetNode?.data.voltage
+        const ratioOf = (node: NodeModel | undefined) => (node?.data as { ratio?: number }).ratio ?? 1
+
+        // 变压器为有向元件：bottom（二次侧）需按变比换算，其余情形电压即端点原值
         if (sourceNode?.type === 'transformer' && sourceSide === 'bottom') {
-          const ratio = (sourceNode.data as { ratio?: number }).ratio ?? 1
-          voltage = (sourceVoltage ?? 380) * ratio
+          voltage = (sourceVoltage ?? 380) * ratioOf(sourceNode)
         } else if (targetNode?.type === 'transformer' && targetSide === 'bottom') {
-          const ratio = (targetNode.data as { ratio?: number }).ratio ?? 1
-          voltage = (targetVoltage ?? 380) * ratio
-        } else if (sourceNode?.type === 'transformer' && sourceSide === 'top') {
-          voltage = sourceVoltage ?? 380
-        } else if (targetNode?.type === 'transformer' && targetSide === 'top') {
-          voltage = targetVoltage ?? 380
-        } else if (sourceNode?.type === 'powerSource') {
-          voltage = sourceVoltage ?? 380
-        } else if (targetNode?.type === 'powerSource') {
-          voltage = targetVoltage ?? 380
+          voltage = (targetVoltage ?? 380) * ratioOf(targetNode)
+        } else {
+          voltage = sourceVoltage ?? targetVoltage ?? 380
         }
       }
 
@@ -129,9 +163,11 @@ export class GridSolver {
         active,
         flow,
         voltage: voltage ?? 380,
+        loop,
+        conflict: voltageConflict.has(edge.sourcePortId) || voltageConflict.has(edge.targetPortId),
       })
     })
 
-    return { nodePowered, nodeState, portStatus, edgeStates, distance }
+    return { nodePowered, nodeState, portStatus, edgeStates, distance, voltageConflict, loopEdges }
   }
 }

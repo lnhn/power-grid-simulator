@@ -2,17 +2,16 @@ import { memo } from 'react'
 import { Handle, Position, NodeProps } from 'reactflow'
 
 export const SimulateLoadNode = memo(({ data, id }: NodeProps) => {
-  const isPowered = data.powered
-  const isRunning = data.status === 'running'
   const portStatus = data.portStatus || {}
-  const topPowered = portStatus.top ?? isPowered
-  const nodeState = data.nodeState
-  const displayRunning = Boolean(nodeState && topPowered)
-  
+  // 统一按端口级判断：负载进线端口（top）是否带电；无端口状态时回退到节点级
+  const topPowered = portStatus.top ?? Boolean(data.powered)
+  const isRunning = data.status === 'running'
+  const displayRunning = Boolean(data.nodeState && topPowered)
+
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation()
 
-    if (!isPowered) {
+    if (!topPowered) {
       if (typeof data.onShowMessage === 'function') {
         data.onShowMessage('设备未通电，无法操作！请先闭合相关断路器。', 'error')
       }
@@ -162,7 +161,7 @@ export const SimulateLoadNode = memo(({ data, id }: NodeProps) => {
     <div 
       onClick={handleClick}
       className={`bg-gradient-to-br ${getLoadColor()} rounded-lg shadow-lg px-6 py-3 min-w-[240px] border-2 transition-all duration-300 ${
-        isPowered ? 'cursor-pointer' : 'cursor-not-allowed opacity-75'
+        topPowered ? 'cursor-pointer' : 'cursor-not-allowed opacity-75'
       }`}
       style={{ pointerEvents: 'all' }}
     >

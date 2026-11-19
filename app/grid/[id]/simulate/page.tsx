@@ -20,7 +20,7 @@ import { SimulateBusNode } from '@/components/nodes/SimulateBusNode'
 import { SimulateTransformerNode } from '@/components/nodes/SimulateTransformerNode'
 import { Toast } from '@/components/Toast'
 import { ConfirmModal } from '@/components/ConfirmModal'
-import { buildGridModels, GridSolver, voltageToColor } from '@/lib/grid'
+import { buildGridModels, GridSolver, voltageToColor, inferTieHandle, normalizeTieHandle } from '@/lib/grid'
 
 const nodeTypes = {
   powerSource: SimulatePowerSourceNode,
@@ -71,18 +71,6 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
   nodesRef.current = nodes
   edgesRef.current = edges
 
-  const inferTieHandle = useCallback((tieNode: Node | undefined, otherNode: Node | undefined, kind: 'source' | 'target') => {
-    if (!tieNode || !otherNode) return undefined
-    return otherNode.position.x < tieNode.position.x ? `left-${kind}` : `right-${kind}`
-  }, [])
-
-  const normalizeTieHandle = useCallback((handle: string | undefined, kind: 'source' | 'target') => {
-    if (!handle) return handle
-    if (kind === 'source' && handle.includes('target')) return handle.replace('target', 'source')
-    if (kind === 'target' && handle.includes('source')) return handle.replace('source', 'target')
-    return handle
-  }, [])
-
   useEffect(() => {
     if (status === 'unauthenticated') {
       router.push('/login')
@@ -90,17 +78,20 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
   }, [status, router])
 
   // 仅当电网 id 变化时拉取电网数据，避免打开操作日志时 showLogs 变化导致重新 fetchGrid 覆盖当前模拟状态
+  // 会话就绪后才请求，未登录时不发起必然 401 的请求
   useEffect(() => {
+    if (status === 'loading' || status === 'unauthenticated') return
     fetchGrid()
-  }, [params.id])
+  }, [params.id, status])
 
   // 日志：初次打开时拉取一次，打开状态下每 5 秒刷新（不依赖 showLogs 触发 fetchGrid）
   useEffect(() => {
+    if (status === 'loading' || status === 'unauthenticated') return
     fetchLogs()
     if (!showLogs) return
     const logInterval = setInterval(fetchLogs, 5000)
     return () => clearInterval(logInterval)
-  }, [params.id, showLogs])
+  }, [params.id, showLogs, status])
 
   const fetchGrid = async () => {
     try {
@@ -163,8 +154,8 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
       setNodes(enhancedNodes)
       setEdges(parsedEdges)
       
-      // 初始化电路状态
-      setTimeout(() => calculateCircuitState(enhancedNodes, parsedEdges), 100)
+      // 初始化电路状态（直接求解，避免 setTimeout 与 state 更新的竞态）
+      applyCircuitState(enhancedNodes, parsedEdges)
     } catch (error) {
       console.error('Failed to fetch grid:', error)
     } finally {
@@ -174,12 +165,10 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
 
   const fetchLogs = async () => {
     try {
-      console.log('Fetching logs for grid:', params.id)
-      const res = await fetch(`/api/logs?gridId=${params.id}`)
+      const res = await fetch(`/api/logs?gridId=${params.id}&pageSize=50`)
       const data = await res.json()
-      const normalizedLogs = Array.isArray(data) ? data : []
-      console.log('Fetched logs:', normalizedLogs.length, 'entries')
-      setLogs(normalizedLogs)
+      // 接口返回 { logs, total, page, pageSize }，兼容旧的数组格式
+      setLogs(Array.isArray(data) ? data : (Array.isArray(data.logs) ? data.logs : []))
     } catch (error) {
       console.error('Failed to fetch logs:', error)
     }
@@ -198,24 +187,12 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
       `断路器${newStatus === 'on' ? '闭合' : '断开'}`
     )
 
-    setNodes((nds) =>
-      nds.map((n) =>
-        n.id === nodeId
-          ? { ...n, data: { ...n.data, status: newStatus } }
-          : n
-      )
+    const nextNodes = nodesRef.current.map((n) =>
+      n.id === nodeId ? { ...n, data: { ...n.data, status: newStatus } } : n
     )
-    setTimeout(() => {
-      setNodes((current) => {
-        setEdges((currentEdges) => {
-          calculateCircuitState(current, currentEdges)
-          return currentEdges
-        })
-        return current
-      })
-    }, 100)
-    // 操作完成后将当前状态写入数据库
-    setTimeout(() => saveGridState(), 150)
+    // 求解后立即更新视图，再把求解结果写入数据库（不在 setState updater 内产生副作用）
+    const { nextNodes: solvedNodes, nextEdges } = applyCircuitState(nextNodes, edgesRef.current)
+    saveGridState(solvedNodes, nextEdges)
   }
 
   const handleLoadToggle = (nodeId: string) => {
@@ -231,30 +208,16 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
       `${node.data.label} ${newStatus === 'running' ? '启动' : '停止'}`
     )
 
-    setNodes((nds) =>
-      nds.map((n) =>
-        n.id === nodeId && n.data.powered
-          ? { ...n, data: { ...n.data, status: newStatus } }
-          : n
-      )
+    const nextNodes = nodesRef.current.map((n) =>
+      n.id === nodeId ? { ...n, data: { ...n.data, status: newStatus } } : n
     )
-    setTimeout(() => {
-      setNodes((current) => {
-        setEdges((currentEdges) => {
-          calculateCircuitState(current, currentEdges)
-          return currentEdges
-        })
-        return current
-      })
-    }, 100)
-    // 操作完成后将当前状态写入数据库
-    setTimeout(() => saveGridState(), 150)
+    // 求解后立即更新视图，再把求解结果写入数据库（不在 setState updater 内产生副作用）
+    const { nextNodes: solvedNodes, nextEdges } = applyCircuitState(nextNodes, edgesRef.current)
+    saveGridState(solvedNodes, nextEdges)
   }
 
-  /** 将当前模拟状态写入数据库（节点/边仅保留可序列化字段） */
-  const saveGridState = useCallback(async () => {
-    const currentNodes = nodesRef.current
-    const currentEdges = edgesRef.current
+  /** 将求解后的模拟状态写入数据库（节点/边仅保留可序列化字段） */
+  const saveGridState = useCallback(async (currentNodes: Node[], currentEdges: Edge[]) => {
     const cleanNodes = currentNodes.map((node) => ({
       id: node.id,
       type: node.type,
@@ -303,8 +266,6 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
 
   const logOperation = async (action: string, targetId: string, details: string) => {
     try {
-      console.log('Logging operation:', { action, targetId, details, gridId: params.id })
-      
       const response = await fetch('/api/logs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -315,10 +276,8 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
           details,
         }),
       })
-      
+
       if (response.ok) {
-        const result = await response.json()
-        console.log('Log saved:', result)
         fetchLogs()
       } else {
         const error = await response.json()
@@ -329,54 +288,63 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
     }
   }
 
-  const calculateCircuitState = (currentNodes: Node[], currentEdges: Edge[]) => {
+  /** 求解电路状态并刷新视图；返回求解后的节点与边，供调用方直接持久化 */
+  const applyCircuitState = (currentNodes: Node[], currentEdges: Edge[]) => {
     const { nodeModels, edgeModels } = buildGridModels(currentNodes, currentEdges)
     const result = GridSolver.solve(nodeModels, edgeModels)
 
-    setNodes((nds) =>
-      nds.map((node) => {
-        const powered = result.nodePowered.get(node.id) ?? false
-        const nodeState = result.nodeState.get(node.id)
-        return {
-          ...node,
-          data: {
-            ...node.data,
-            powered,
-            nodeState,
-            voltage: powered ? (node.data?.voltage ?? (node.type === 'powerSource' ? 380 : 380)) : 0,
-            portStatus: result.portStatus.get(node.id),
-          },
-        }
-      })
-    )
+    const solvedNodes = currentNodes.map((node) => {
+      const powered = result.nodePowered.get(node.id) ?? false
+      const sides = ['top', 'bottom', 'left', 'right']
+      const conflict = sides.some((side) => result.voltageConflict.has(`${node.id}:${side}`))
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          powered,
+          nodeState: result.nodeState.get(node.id),
+          voltage: powered ? (node.data?.voltage ?? 380) : 0,
+          portStatus: result.portStatus.get(node.id),
+          conflict,
+        },
+      }
+    })
 
-    setEdges((eds) =>
-      eds.map((edge) => {
-        const state = result.edgeStates.get(edge.id)
-        const active = state?.active ?? false
-        const flow = state?.flow ?? 'none'
-        const voltage = state?.voltage ?? 380
-        const flowClass =
-          flow === 'reverse' ? 'edge-flow-reverse' : flow === 'forward' ? 'edge-flow-forward' : ''
-        const stroke = active ? voltageToColor(voltage) : '#cbd5e1'
+    const solvedEdges = currentEdges.map((edge) => {
+      const state = result.edgeStates.get(edge.id)
+      const active = state?.active ?? false
+      const flow = state?.flow ?? 'none'
+      const voltage = state?.voltage ?? 380
+      const conflict = state?.conflict ?? false
+      const loop = state?.loop ?? false
+      const flowClass =
+        flow === 'reverse' ? 'edge-flow-reverse' : flow === 'forward' ? 'edge-flow-forward' : ''
+      const stroke = conflict ? '#ef4444' : active ? voltageToColor(voltage) : '#cbd5e1'
 
-        return {
-          ...edge,
-          animated: active,
-          className: [edge.className, flowClass].filter(Boolean).join(' '),
-          style: {
-            ...edge.style,
-            stroke,
-            strokeWidth: active ? 3 : 2,
-          },
-          data: {
-            ...edge.data,
-            flow,
-            voltage,
-          },
-        }
-      })
-    )
+      return {
+        ...edge,
+        animated: active,
+        className: [edge.className, flowClass].filter(Boolean).join(' '),
+        style: {
+          ...edge.style,
+          stroke,
+          strokeWidth: conflict ? 3 : active ? 3 : 2,
+          strokeDasharray: conflict ? '6 4' : (edge.style as { strokeDasharray?: string })?.strokeDasharray,
+        },
+        data: {
+          ...edge.data,
+          flow,
+          voltage,
+          conflict,
+          loop,
+        },
+      }
+    })
+
+    setNodes(solvedNodes)
+    setEdges(solvedEdges)
+
+    return { nextNodes: solvedNodes, nextEdges: solvedEdges }
   }
 
   if (status === 'loading' || loading) {

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
+import { authOptions, requireRole } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 
 /**
@@ -12,10 +12,8 @@ export async function PATCH(
 ) {
   try {
     const session = await getServerSession(authOptions)
-
-    if (!session) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    const denied = requireRole(session, ['ENGINEER', 'OPERATOR'])
+    if (denied) return denied
 
     const { nodes, edges } = await request.json()
 
@@ -24,6 +22,11 @@ export async function PATCH(
         { error: '缺少 nodes 或 edges' },
         { status: 400 }
       )
+    }
+
+    const existing = await prisma.powerGrid.findUnique({ where: { id: params.id } })
+    if (!existing) {
+      return NextResponse.json({ error: 'Grid not found' }, { status: 404 })
     }
 
     const grid = await prisma.powerGrid.update({
