@@ -1,189 +1,137 @@
-# 化工厂电网模拟系统
+# 小型工厂电网模拟系统
 
-一个基于 Next.js、TypeScript、Tailwind CSS 和 Prisma 的化工厂小型电网模拟应用。
+面向小型工厂（车间/装置区）的单线图构建、通断模拟与设备台账管理工具。
 
-## 功能特点
+当前版本：**v2.3**（电气语义重建进行中，见 [docs/ROADMAP.md](docs/ROADMAP.md)）
 
-### 用户角色
-- **工程师**：可以创建、编辑电网图，并进行模拟测试
-- **操作员**：只能进行模拟操作，不能编辑电网
+## 它解决什么问题
 
-### 核心功能
-1. **登录系统**：基于 NextAuth 的安全认证
-2. **电网管理**：创建、查看、编辑多个电网
-3. **可视化编辑**：
-   - 拖拽添加电气元件（电源、开关、负载、母线）
-   - 使用曼哈顿式连线
-   - 编辑元件属性
-   - 删除元件和连线
-4. **实时模拟**：
-   - 开关操作
-   - 电流流动动画
-   - 电路通断模拟
-   - 实时状态显示
-5. **操作日志**：记录所有操作（操作员、时间、操作类型）
+1. **构建**：用拖拽方式画出一张工厂单线图（进线 -> 母线 -> 馈线 -> 设备），并维护设备台账。
+2. **模拟**：开合断路器、启停设备，实时计算哪一段带电、负荷由哪一路供电。
+3. **追溯**：每一次操作都记录操作人、时间、对象，支持按电网查询。
+
+> 定位说明：当前是**连通性模拟器**（带电/失电 + 电流流向），不是潮流计算程序。电气量（电流、功率、负载率）在 v2.4 引入，详见路线图。
 
 ## 技术栈
 
-- **前端框架**：Next.js 14 (App Router)
-- **UI 框架**：React 18
-- **样式**：Tailwind CSS
-- **流程图**：ReactFlow
-- **数据库**：SQLite + Prisma ORM
-- **认证**：NextAuth.js
-- **语言**：TypeScript
+- Next.js 14（App Router）+ React 18 + TypeScript
+- ReactFlow 11（画布与连线）
+- Tailwind CSS 3
+- Prisma 5 + SQLite
+- NextAuth 4（Credentials + JWT）
+- Vitest（求解器单元测试）
 
-## 安装和运行
+## 快速开始
 
-### 1. 安装依赖
 ```bash
 npm install
-```
-
-### 2. 初始化数据库
-```bash
 npx prisma generate
 npx prisma db push
+npm run seed        # 初始化账号与示例电网
+npm run dev         # http://localhost:3000
 ```
 
-### 3. 填充初始数据
-```bash
-npx tsx prisma/seed.ts
-```
+Windows 下也可用 `start.sh`（Git Bash / MSYS2）完成首次初始化。
 
-### 4. 启动开发服务器
-```bash
-npm run dev
-```
+环境变量见 `.env.example`：
 
-访问 http://localhost:3000
+| 变量 | 说明 |
+|---|---|
+| `DATABASE_URL` | SQLite 路径，默认 `file:./dev.db` |
+| `NEXTAUTH_SECRET` | 生产环境必须替换为随机值 |
+| `NEXTAUTH_URL` | 站点地址 |
+| `SEED_PASSWORD` | 种子账号初始口令，默认 `password`（仅本地开发） |
 
 ## 测试账号
 
-### 工程师账号
-- 用户名: `engineer`
-- 密码: `password`
-- 权限: 可以创建和编辑电网
+| 账号 | 口令 | 角色 | 权限 |
+|---|---|---|---|
+| `engineer` | `password` | 工程师 | 创建/编辑电网、导出设备清单、模拟操作 |
+| `operator` | `password` | 操作员 | 查看、模拟操作、导出设备清单 |
 
-### 操作员账号
-- 用户名: `operator`
-- 密码: `password`
-- 权限: 只能查看和模拟操作
+口令由 `SEED_PASSWORD` 决定，可在种子前覆盖。
 
-## 使用指南
+## 电气元件
 
-### 工程师操作流程
+| 元件 | 端子 | 说明 |
+|---|---|---|
+| 电源 `powerSource` | 底部输出 | 提供额定电压，始终带电 |
+| 母线 `bus` | 四向互通 | 电力分配节点，四端口内部短接 |
+| 断路器 `switch` | 上入下出 | 开/合决定是否通流，带额定电流 |
+| 母联 `switch(subType=tie)` | 左右两端 | 两段母线之间的联络开关，双向 |
+| 变压器 `transformer` | 上入下出（有向） | 二次侧电压 = 一次侧 × `ratio` |
+| 负载 `load` | 上入 | 泵、风机、压缩机、加热器等，可启停 |
 
-1. **登录**：使用工程师账号登录
-2. **创建电网**：
-   - 点击"创建电网"按钮
-   - 输入电网名称和描述
-3. **编辑电网**：
-   - 从左侧面板拖拽元件到画布
-   - 点击元件边缘的连接点拖拽连线
-   - 按 Delete/Backspace 删除选中元素
-   - 点击"保存"保存更改
-4. **模拟运行**：点击"模拟运行"测试电网
-
-### 操作员操作流程
-
-1. **登录**：使用操作员账号登录
-2. **选择电网**：从列表中选择要操作的电网
-3. **模拟操作**：
-   - 点击开关节点切换开关状态
-   - 观察电流流动动画
-   - 查看系统状态面板
-   - 查看操作日志
-
-## 电气元件说明
-
-### 电源（Power Source）
-- 提供 220V 电压
-- 蓝色边框
-- 始终处于运行状态
-
-### 开关（Switch）
-- 可以切换开/关状态
-- 绿色边框表示闭合，红色边框表示断开
-- 点击切换状态（仅在模拟模式）
-
-### 负载（Load）
-- 消耗电能的设备
-- 琥珀色边框
-- 显示功率和电压信息
-
-### 母线（Bus）
-- 电力分配节点
-- 靛蓝色边框
-- 可以多方向连接
-
-## 项目结构
+## 目录结构
 
 ```
 power-grid-simulator/
-├── app/                      # Next.js App Router
-│   ├── api/                 # API 路由
-│   │   ├── auth/           # 认证 API
-│   │   ├── grids/          # 电网管理 API
-│   │   └── logs/           # 操作日志 API
-│   ├── dashboard/          # 仪表盘页面
-│   ├── grid/[id]/          # 电网详情
-│   │   ├── edit/          # 编辑模式
-│   │   └── simulate/      # 模拟模式
-│   ├── login/              # 登录页面
-│   └── globals.css         # 全局样式
-├── components/              # React 组件
-│   └── nodes/              # 自定义节点组件
-├── lib/                     # 工具库
-│   ├── auth.ts             # 认证配置
-│   └── prisma.ts           # Prisma 客户端
-├── prisma/                  # 数据库
-│   ├── schema.prisma       # 数据模型
-│   └── seed.ts             # 初始数据
-└── types/                   # TypeScript 类型定义
+├── app/
+│   ├── api/
+│   │   ├── auth/                        # NextAuth
+│   │   ├── grids/                       # 电网 CRUD
+│   │   │   └── [id]/
+│   │   │       ├── state/               # 模拟状态回写（v2.4 将改为快照）
+│   │   │       └── equipment/           # 设备清单查询与导出（json/csv）
+│   │   └── logs/                        # 操作日志（分页）
+│   ├── dashboard/                       # 电网列表
+│   ├── grid/[id]/edit/                  # 编辑模式（画布 + 属性面板 + 校验）
+│   ├── grid/[id]/simulate/              # 模拟模式（操作 + 状态 + 日志）
+│   ├── equipment/                       # 设备台账
+│   ├── logs/                            # 日志查询
+│   └── login/
+├── components/
+│   ├── nodes/                           # 编辑态/模拟态元件渲染器
+│   ├── ConfirmModal.tsx
+│   └── Toast.tsx
+├── lib/
+│   ├── auth.ts                          # NextAuth 配置 + requireRole()
+│   ├── prisma.ts
+│   └── grid/
+│       ├── adapter.ts                   # ReactFlow <-> 端口模型
+│       ├── rules.ts                     # 各元件端子与状态规则
+│       ├── models/                      # NodeModel / EdgeModel / PortModel
+│       └── engine/
+│           ├── GridGraph.ts             # 端口图构建
+│           ├── GridSolver.ts            # 带电传播与流向
+│           └── GridSolver.test.ts
+├── prisma/
+│   ├── schema.prisma
+│   ├── seed.ts
+│   └── dev.db                           # 本地库（不入版本库）
+└── docs/ROADMAP.md                      # 改造路线图
 ```
 
-## 数据库模型
+## 数据模型
 
-### User（用户）
-- username: 用户名
-- password: 加密密码
-- role: 角色（ENGINEER/OPERATOR）
+| 模型 | 说明 |
+|---|---|
+| `User` | `username` / `password`(bcrypt) / `role`(ENGINEER\|OPERATOR) |
+| `PowerGrid` | `nodes` / `edges`（ReactFlow JSON 字符串） |
+| `OperationLog` | 操作人、电网、动作、目标元件、时间、详情 |
+| `Equipment` | 设备台账，保存电网时由节点同步生成（含子类型/功率/电压/电流） |
 
-### PowerGrid（电网）
-- name: 电网名称
-- description: 描述
-- nodes: 节点数据（JSON）
-- edges: 连线数据（JSON）
+## 已知限制（v2.3）
 
-### OperationLog（操作日志）
-- userId: 操作用户
-- gridId: 电网ID
-- action: 操作类型
-- targetId: 目标元件ID
-- timestamp: 操作时间
+这些是路线图 M1/M2 要解决的问题，先如实记录：
 
-## 特色设计
+1. 求解器只做**连通性**判断，不计算电流、功率、电压降。
+2. **电压不沿拓扑传播**：连线电压取端点配置值，母线默认 0，因此电压配色分级基本失效。
+3. **模拟状态会写回设计数据**：失电节点的 `voltage` 被置 0 并持久化，可能覆盖额定参数。
+4. **母联端子靠坐标推断**：`inferSide` 对母联忽略 handle，两段母线可能被判到同一端子而静默合并，导致母联断开仍然导通。
+5. 变压器降压后与另一路电源并列时，可能**误报电压冲突**。
+6. 没有告警、趋势、故障注入与回放。
 
-1. **现代化UI**：采用浅色主题，渐变色设计
-2. **实时反馈**：操作即时生效，动画流畅
-3. **权限控制**：严格的角色权限管理
-4. **操作追溯**：完整的操作日志记录
-5. **响应式布局**：适配不同屏幕尺寸
+## 开发
 
-## 开发说明
+```bash
+npm test          # Vitest：求解器用例
+npm run lint
+npm run build
+```
 
-### 添加新的电气元件
-
-1. 在 `components/nodes/` 创建新节点组件
-2. 在编辑页面的 `nodeTypes` 中注册
-3. 在模拟页面的 `nodeTypes` 中注册
-4. 更新 `addNode` 函数添加新类型
-
-### 扩展电路计算
-
-修改 `calculateCircuitState` 函数实现更复杂的电路计算逻辑。
+新增元件类型：在 `lib/grid/rules.ts` 注册规则 -> 在 `components/nodes/` 增加渲染器 -> 在编辑/模拟页注册 `nodeTypes`。
 
 ## 许可证
 
-MIT License
+MIT
