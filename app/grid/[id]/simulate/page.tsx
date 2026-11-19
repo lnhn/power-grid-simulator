@@ -67,7 +67,7 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
     message: string
     onConfirm: () => void
   }>({ open: false, title: '', message: '', onConfirm: () => {} })
-  const [summary, setSummary] = useState<{ sections: SectionState[]; ties: TieState[] } | null>(null)
+  const [summary, setSummary] = useState<{ sections: SectionState[]; ties: TieState[]; totalKw: number } | null>(null)
   const nodesRef = useRef<Node[]>([])
   const edgesRef = useRef<Edge[]>([])
   nodesRef.current = nodes
@@ -274,6 +274,8 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
           liveVoltage: view?.voltage ?? 0,
           sectionVoltage: view?.sectionVoltage,
           tieMode: view?.tieMode,
+          loadKw: view?.loadKw ?? 0,
+          sourceKw: view?.sourceKw ?? 0,
         },
       }
     })
@@ -285,6 +287,7 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
       const voltage = state?.voltage ?? 0
       const conflict = state?.conflict ?? false
       const loop = state?.loop ?? false
+      const amp = state?.amp ?? null
       const flowClass =
         flow === 'reverse' ? 'edge-flow-reverse' : flow === 'forward' ? 'edge-flow-forward' : ''
       const stroke = conflict ? '#ef4444' : active ? voltageToColor(voltage) : '#cbd5e1'
@@ -293,7 +296,7 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
         ...edge,
         animated: active,
         className: [edge.className, flowClass].filter(Boolean).join(' '),
-        label: active && voltage > 0 ? `${voltage}V` : undefined,
+        label: active && voltage > 0 ? voltage + 'V' + (loop ? ' · 环网' : amp === null ? ' · 并联' : amp && amp > 0 ? ' · ' + Math.round(amp) + 'A' : '') : undefined,
         labelStyle: { fontSize: 10, fill: '#334155', fontWeight: 600 },
         labelBgStyle: { fill: '#f8fafc', fillOpacity: 0.92 },
         labelBgPadding: [4, 2] as [number, number],
@@ -310,13 +313,16 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
           voltage,
           conflict,
           loop,
+          kw: state?.kw ?? 0,
+          amp: state?.amp ?? null,
+          shared: state?.shared ?? false,
         },
       }
     })
 
     setNodes(solvedNodes)
     setEdges(solvedEdges)
-    setSummary({ sections: result.sections, ties: Array.from(result.ties.values()) })
+    setSummary({ sections: result.sections, ties: Array.from(result.ties.values()), totalKw: result.totalKw })
 
     return { nextNodes: solvedNodes, nextEdges: solvedEdges }
   }
@@ -435,6 +441,15 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
                 <div className="text-xs text-purple-700 mt-1">运行 / 总数</div>
               </div>
             </div>
+              <div className="bg-gradient-to-br from-amber-50 to-amber-100 rounded-xl p-4 border border-amber-200">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs text-amber-700 font-semibold uppercase tracking-wide">总负荷</span>
+                </div>
+                <div className="text-2xl font-bold text-amber-900">
+                  {summary ? summary.totalKw.toFixed(0) : 0} <span className="text-sm">kW</span>
+                </div>
+                <div className="text-xs text-amber-700 mt-1">各段负荷合计</div>
+              </div>
             {summary && (
               <div className="mt-6 pt-6 border-t border-gray-200">
                 <h3 className="text-sm font-bold text-gray-800 mb-3">运行方式</h3>
@@ -477,7 +492,7 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
                       className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2"
                     >
                       <span className="text-[11px] text-gray-600">
-                        第 {index + 1} 段 · {section.busIds.length} 条母线
+                        第 {index + 1} 段 · {section.busIds.length} 母线 · {section.loadCount} 台 · {section.loadKw.toFixed(0)}kW
                       </span>
                       <span className={`text-[11px] font-bold ${section.energized ? 'text-emerald-600' : 'text-gray-400'}`}>
                         {section.energized ? `${section.voltage}V` : '失电'}

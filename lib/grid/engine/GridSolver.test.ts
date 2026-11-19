@@ -317,3 +317,106 @@ describe('tie operation modes', () => {
     expect(result.edgeStates.get('e2')?.voltage).toBe(380)
   })
 })
+
+describe('power aggregation', () => {
+  const src = (id: string, x: number, y: number, voltage = 380) => ({ id, type: 'powerSource', position: { x, y }, data: { voltage } })
+  const bus = (id: string, x: number, y: number, voltage = 380) => ({ id, type: 'bus', position: { x, y }, data: { voltage } })
+  const sw = (id: string, status: string, x: number, y: number) => ({ id, type: 'switch', position: { x, y }, data: { status } })
+  const load = (id: string, power: number, status: string, x: number, y: number) => ({
+    id,
+    type: 'load',
+    position: { x, y },
+    data: { status, power },
+  })
+
+  const chain = (loadStatus: string, switchStatus: string) => {
+    const nodes: unknown[] = [src('ps', 100, 60), bus('b', 300, 160), sw('k', switchStatus, 300, 260), load('m', 100, loadStatus, 300, 360)]
+    const edges: unknown[] = [
+      { id: 'e1', source: 'ps', target: 'b', sourceHandle: 'bottom', targetHandle: 'top' },
+      { id: 'e2', source: 'b', target: 'k', sourceHandle: 'bottom', targetHandle: 'top' },
+      { id: 'e3', source: 'k', target: 'm', sourceHandle: 'bottom', targetHandle: 'top' },
+    ]
+    return buildGridModels(asNodes(nodes), asEdges(edges))
+  }
+
+  it('sums running load power into the section and the source', () => {
+    const { nodeModels, edgeModels } = chain('running', 'on')
+    const result = GridSolver.solve(nodeModels, edgeModels)
+    expect(result.totalKw).toBe(100)
+    expect(result.sections[0].loadKw).toBe(100)
+    expect(result.sections[0].loadCount).toBe(1)
+    expect(result.sourceOutput.get('ps')).toBe(100)
+    expect(result.loadKw.get('m')).toBe(100)
+  })
+
+  it('counts a stopped load as zero', () => {
+    const { nodeModels, edgeModels } = chain('stopped', 'on')
+    const result = GridSolver.solve(nodeModels, edgeModels)
+    expect(result.totalKw).toBe(0)
+    expect(result.sections[0].loadCount).toBe(0)
+  })
+
+  it('counts an unpowered running load as zero', () => {
+    const { nodeModels, edgeModels } = chain('running', 'off')
+    const result = GridSolver.solve(nodeModels, edgeModels)
+    expect(result.totalKw).toBe(0)
+    expect(result.loadKw.get('m')).toBe(0)
+  })
+
+  it('accumulates current along the supply path', () => {
+    const { nodeModels, edgeModels } = chain('running', 'on')
+    const result = GridSolver.solve(nodeModels, edgeModels)
+    const expected = (100 * 1000) / (Math.sqrt(3) * 380 * 0.85)
+    expect(result.edgeStates.get('e3')?.kw).toBe(100)
+    expect(result.edgeStates.get('e3')?.amp).toBeCloseTo(expected, 1)
+    expect(result.edgeStates.get('e1')?.amp).toBeCloseTo(expected, 1)
+    expect(result.sections[0].currentA).toBeCloseTo(expected, 1)
+  })
+
+  it('splits section load evenly between parallel sources when the tie is closed', () => {
+    const nodes: unknown[] = [
+      src('ps1', 100, 60),
+      bus('b1', 300, 160),
+      { id: 'tie', type: 'switch', position: { x: 600, y: 160 }, data: { subType: 'tie', status: 'on' } },
+      bus('b2', 900, 160),
+      src('ps2', 1100, 60),
+      load('m1', 100, 'running', 300, 360),
+      load('m2', 300, 'running', 900, 360),
+    ]
+    const edges: unknown[] = [
+      { id: 'e1', source: 'ps1', target: 'b1', sourceHandle: 'bottom', targetHandle: 'top' },
+      { id: 'e2', source: 'b1', target: 'tie', sourceHandle: 'right', targetHandle: 'left-target' },
+      { id: 'e3', source: 'tie', target: 'b2', sourceHandle: 'right-source', targetHandle: 'top' },
+      { id: 'e4', source: 'ps2', target: 'b2', sourceHandle: 'bottom', targetHandle: 'top' },
+      { id: 'e5', source: 'b1', target: 'm1', sourceHandle: 'bottom', targetHandle: 'top' },
+      { id: 'e6', source: 'b2', target: 'm2', sourceHandle: 'bottom', targetHandle: 'top' },
+    ]
+    const { nodeModels, edgeModels } = buildGridModels(asNodes(nodes), asEdges(edges))
+    const result = GridSolver.solve(nodeModels, edgeModels)
+    expect(result.sections).toHaveLength(1)
+    expect(result.totalKw).toBe(400)
+    expect(result.sourceOutput.get('ps1')).toBe(200)
+    expect(result.sourceOutput.get('ps2')).toBe(200)
+    expect(result.ties.get('tie')?.mode).toBe('parallel')
+  })
+
+  it('keeps load power across a transformer and converts current per side', () => {
+    const nodes: unknown[] = [
+      src('ps', 100, 60, 1000),
+      { id: 'tx', type: 'transformer', position: { x: 300, y: 140 }, data: { voltage: 1000, ratio: 0.4 } },
+      bus('b', 500, 260, 400),
+      load('m', 100, 'running', 500, 360),
+    ]
+    const edges: unknown[] = [
+      { id: 'e1', source: 'ps', target: 'tx', sourceHandle: 'bottom', targetHandle: 'top' },
+      { id: 'e2', source: 'tx', target: 'b', sourceHandle: 'bottom', targetHandle: 'top' },
+      { id: 'e3', source: 'b', target: 'm', sourceHandle: 'bottom', targetHandle: 'top' },
+    ]
+    const { nodeModels, edgeModels } = buildGridModels(asNodes(nodes), asEdges(edges))
+    const result = GridSolver.solve(nodeModels, edgeModels)
+    expect(result.totalKw).toBe(100)
+    expect(result.edgeStates.get('e1')?.kw).toBe(100)
+    expect(result.edgeStates.get('e1')?.amp).toBeCloseTo((100 * 1000) / (Math.sqrt(3) * 1000 * 0.85), 1)
+    expect(result.edgeStates.get('e3')?.amp).toBeCloseTo((100 * 1000) / (Math.sqrt(3) * 400 * 0.85), 1)
+  })
+})

@@ -180,6 +180,9 @@ export const SimulateLoadNode = memo(({ data, id }: NodeProps) => {
           </div>
           <div>
             <div className="font-bold text-white text-sm">{data.label}</div>
+            {displayRunning && data.loadKw ? (
+              <div className="text-[10px] text-white/80 mt-0.5">{data.loadKw} kW</div>
+            ) : null}
           </div>
         </div>
         

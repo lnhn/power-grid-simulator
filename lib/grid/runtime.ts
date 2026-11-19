@@ -15,6 +15,10 @@ export type NodeRuntimeView = {
   sectionId?: string
   sectionVoltage?: number
   tieMode?: TieMode
+  /** 负荷当前功率（kW） */
+  loadKw?: number
+  /** 电源当前出力（kW） */
+  sourceKw?: number
 }
 
 export function buildNodeRuntime(nodes: NodeModel[], result: GridSolveResult): Map<string, NodeRuntimeView> {
@@ -38,6 +42,8 @@ export function buildNodeRuntime(nodes: NodeModel[], result: GridSolveResult): M
       sectionId: section?.id,
       sectionVoltage: section?.voltage,
       tieMode: tie?.mode,
+      loadKw: result.loadKw.get(node.id) ?? 0,
+      sourceKw: result.sourceOutput.get(node.id) ?? 0,
     })
   })
 

@@ -3,6 +3,7 @@ import { NodeModel } from '../models/NodeModel'
 import { Side } from '../models/PortModel'
 import { GridGraph } from './GridGraph'
 import { buildElectricalUnion, computePotentials } from './potential'
+import { computePower, powerToCurrent } from './power'
 
 export type FlowDirection = 'forward' | 'reverse' | 'none'
 
@@ -11,6 +12,12 @@ export type EdgeState = {
   active: boolean
   flow: FlowDirection
   voltage: number
+  /** 该边流过的有功功率（kW），环网并联路径为 0 */
+  kw: number
+  /** 该边电流（A）；环网并联路径无法唯一分配，为 null */
+  amp: number | null
+  /** 是否属于环网并联路径（不在生成树上） */
+  shared: boolean
   /** 环网交叉边（不属于 BFS 生成树） */
   loop: boolean
   /** 所在电气节点出现电位冲突 */
@@ -22,8 +29,15 @@ export type SectionState = {
   id: string
   busIds: string[]
   sourceIds: string[]
+  loadIds: string[]
   voltage: number
   energized: boolean
+  /** 本段在用负荷合计（kW） */
+  loadKw: number
+  /** 本段运行中的负荷台数 */
+  loadCount: number
+  /** 本段负荷电流合计（A），按三相功率换算 */
+  currentA: number
 }
 
 export type TieMode = 'sectioned' | 'parallel' | 'standby' | 'unsafeParallel'
@@ -55,6 +69,12 @@ export type GridSolveResult = {
   sections: SectionState[]
   /** 母联运行方式 */
   ties: Map<string, TieState>
+  /** 每个负荷当前用电功率（kW） */
+  loadKw: Map<string, number>
+  /** 每个电源当前出力（kW，同段内平均分摊） */
+  sourceOutput: Map<string, number>
+  /** 全网在用负荷合计（kW） */
+  totalKw: number
 }
 
 export const voltageToColor = (voltage: number) => {
@@ -71,11 +91,10 @@ export class GridSolver {
   static solve(nodes: NodeModel[], edges: EdgeModel[]): GridSolveResult {
     const uf = buildElectricalUnion(nodes, edges)
     const potentials = computePotentials(uf, nodes)
-
     const portEnergized = (portId: string) => potentials.voltages.has(uf.find(portId))
     const portVoltage = (portId: string) => potentials.voltages.get(uf.find(portId)) ?? 0
 
-    // BFS：仅用于判断"从电源出发的供电层级"（流向）与环网交叉边，不参与带电判定
+    // BFS：判断"从电源出发的供电层级"（流向）与环网交叉边，不参与带电判定
     const graph = new GridGraph(nodes, edges)
     const distance = new Map<string, number>()
     const treeEdge = new Map<string, string | undefined>()
@@ -130,6 +149,9 @@ export class GridSolver {
       nodeState.set(node.id, node.computeNodeState(status))
     })
 
+    // 功率汇总：负荷功率沿生成树回推到电源
+    const power = computePower(nodes, edges, graph, portVoltages)
+
     const edgeStates = new Map<string, EdgeState>()
     graph.edges.forEach((edge) => {
       const sourceEnergized = portEnergized(edge.sourcePortId)
@@ -154,12 +176,22 @@ export class GridSolver {
       const voltage = active ? portVoltage(edge.sourcePortId) : 0
       const conflict =
         potentials.conflicts.has(uf.find(edge.sourcePortId)) || potentials.conflicts.has(uf.find(edge.targetPortId))
+      const kw = active ? power.edgeKw.get(edge.id) ?? 0 : 0
+      const shared = power.sharedEdges.has(edge.id)
+      // 电流按下游（更远离电源的一端）电压换算；环网并联路径无法唯一分配
+      const childPort =
+        (targetDist ?? -1) >= (sourceDist ?? -1) ? edge.targetPortId : edge.sourcePortId
+      const childVoltage = portVoltages.get(childPort) ?? 0
+      const amp = shared ? null : kw > 0 ? powerToCurrent(kw, childVoltage) : 0
 
       edgeStates.set(edge.id, {
         id: edge.id,
         active,
         flow,
         voltage,
+        kw,
+        amp,
+        shared,
         loop,
         conflict,
       })
@@ -184,8 +216,12 @@ export class GridSolver {
             id: root,
             busIds: [],
             sourceIds: [],
+            loadIds: [],
             voltage: potentials.voltages.get(root) ?? 0,
             energized: potentials.voltages.has(root),
+            loadKw: 0,
+            loadCount: 0,
+            currentA: 0,
           }
           sectionMap.set(root, section)
         }
@@ -198,6 +234,26 @@ export class GridSolver {
         const section = sectionMap.get(uf.find(`${source.id}:bottom`))
         if (section && !section.sourceIds.includes(source.id)) section.sourceIds.push(source.id)
       })
+
+    nodes
+      .filter((node) => node.type === 'load')
+      .forEach((load) => {
+        const section = sectionMap.get(uf.find(`${load.id}:top`))
+        if (!section) return
+        const kw = power.loadKw.get(load.id) ?? 0
+        section.loadIds.push(load.id)
+        section.loadKw += kw
+        if (kw > 0) section.loadCount += 1
+      })
+
+    let totalKw = 0
+    const sourceOutput = new Map<string, number>()
+    sectionMap.forEach((section) => {
+      totalKw += section.loadKw
+      section.currentA = powerToCurrent(section.loadKw, section.voltage)
+      const share = section.sourceIds.length > 0 ? section.loadKw / section.sourceIds.length : 0
+      section.sourceIds.forEach((sourceId) => sourceOutput.set(sourceId, share))
+    })
 
     const ties = new Map<string, TieState>()
     nodes
@@ -248,6 +304,9 @@ export class GridSolver {
       loopEdges,
       sections: Array.from(sectionMap.values()),
       ties,
+      loadKw: power.loadKw,
+      sourceOutput,
+      totalKw,
     }
   }
 }
