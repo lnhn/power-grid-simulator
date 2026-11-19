@@ -59,7 +59,7 @@ export class GridSolver {
         if (distance.has(portId)) return
         distance.set(portId, 0)
         sourceOf.set(portId, node.id)
-        sourceVoltageOf.set(portId, (node.data as { voltage?: number }).voltage ?? 380)
+        sourceVoltageOf.set(portId, node.data.ratedVoltage ?? 380)
         treeEdge.set(portId, undefined)
         queue.push(portId)
       })
@@ -144,8 +144,8 @@ export class GridSolver {
         const [targetNodeId, targetSide] = edge.targetPortId.split(':')
         const sourceNode = graph.nodes.get(sourceNodeId)
         const targetNode = graph.nodes.get(targetNodeId)
-        const sourceVoltage = sourceNode?.data.voltage
-        const targetVoltage = targetNode?.data.voltage
+        const sourceVoltage = sourceNode?.data.ratedVoltage
+        const targetVoltage = targetNode?.data.ratedVoltage
         const ratioOf = (node: NodeModel | undefined) => (node?.data as { ratio?: number }).ratio ?? 1
 
         // 变压器为有向元件：bottom（二次侧）需按变比换算，其余情形电压即端点原值

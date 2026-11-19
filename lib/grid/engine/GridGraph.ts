@@ -45,7 +45,8 @@ export class GridGraph {
       }
 
       if (node.type === 'switch') {
-        if (node.data.status !== 'on') return
+        // 开关位置是设计参数：只有闭合时才在内部导通
+        if (node.data.closed !== true) return
         if (node.data.subType === 'tie') {
           this.addBidirectional(`${node.id}:left`, `${node.id}:right`)
           return

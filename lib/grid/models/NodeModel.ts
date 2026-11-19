@@ -3,15 +3,34 @@ import { PortModel, Side } from './PortModel'
 
 export type NodeType = 'powerSource' | 'switch' | 'load' | 'bus' | 'transformer'
 
-export type NodeStatus = 'on' | 'off' | 'running' | 'stopped' | undefined
+export type SwitchSubType = 'breaker' | 'tie'
+export type PowerSourceKind = 'grid' | 'generator' | 'ups'
 
+/**
+ * 设计态参数：只描述"这台设备是什么、额定多少、开关在什么位置"。
+ * 运行态（带电、电位、电流）一律不进这里，由求解结果单独承载。
+ */
 export type NodeModelData = {
-  status?: NodeStatus
+  label?: string
+  /** 开关：breaker | tie；负载：泵/风机等 */
   subType?: string
-  voltage?: number
-  ratio?: number
-  capacity?: number
+  ratedVoltage?: number
+
+  /** 电源 */
+  kind?: PowerSourceKind
+  inService?: boolean
+
+  /** 开关与母联 */
+  closed?: boolean
   ratedCurrent?: number
+
+  /** 负载 */
+  running?: boolean
+  ratedPower?: number
+  powerFactor?: number
+
+  /** 变压器 */
+  ratio?: number
 }
 
 export class NodeModel {
@@ -43,13 +62,32 @@ export class NodeModel {
     return this.ports.get(side)
   }
 
+  /** 母联：两段母线之间的联络开关，只有左右两个端子 */
+  isTie(): boolean {
+    return this.type === 'switch' && this.data.subType === 'tie'
+  }
+
+  /** 开关位置（设计参数，不是"带电"） */
+  isClosed(): boolean {
+    return this.data.closed === true
+  }
+
+  /** 设备运行状态（负载启停） */
+  isRunning(): boolean {
+    return this.data.running === true
+  }
+
+  getRatedVoltage(): number {
+    return this.data.ratedVoltage ?? 380
+  }
+
   getInputSides(): Side[] {
-    if (this.type === 'switch' && this.data.subType === 'tie') return ['left', 'right']
+    if (this.isTie()) return ['left', 'right']
     return NODE_RULES[this.type].inputSides
   }
 
   getOutputSides(): Side[] {
-    if (this.type === 'switch' && this.data.subType === 'tie') return ['left', 'right']
+    if (this.isTie()) return ['left', 'right']
     return NODE_RULES[this.type].outputSides
   }
 
@@ -58,9 +96,6 @@ export class NodeModel {
   }
 
   computeNodeState(status: Record<Side, boolean>): boolean {
-    if (this.type === 'switch' && this.data.subType === 'tie') {
-      return this.data.status === 'on'
-    }
     return NODE_RULES[this.type].computeNodeState(status, this.data)
   }
 
@@ -73,7 +108,7 @@ export class NodeModel {
   }
 
   getMultiplicitySide(inferredSide: Side): Side | null {
-    if (this.type === 'switch' && this.data.subType === 'tie') return inferredSide
+    if (this.isTie()) return null
     return NODE_RULES[this.type].multiplicitySide(inferredSide)
   }
 }

@@ -15,14 +15,14 @@ export const NODE_RULES: Record<NodeType, NodeRule> = {
     outputSides: ['bottom'],
     multiplicitySide: () => null,
     computePowered: () => true,
-    computeNodeState: () => true,
+    computeNodeState: (_status, data) => data.inService !== false,
   },
   load: {
     inputSides: ['top'],
     outputSides: [],
     multiplicitySide: () => 'top',
     computePowered: (status) => status.top,
-    computeNodeState: (_status, data) => data.status === 'running',
+    computeNodeState: (_status, data) => data.running === true,
   },
   transformer: {
     inputSides: ['top'],
@@ -43,6 +43,6 @@ export const NODE_RULES: Record<NodeType, NodeRule> = {
     outputSides: ['bottom'],
     multiplicitySide: () => 'top',
     computePowered: (status) => status.top || status.bottom || status.left || status.right,
-    computeNodeState: (_status, data) => data.status === 'on',
+    computeNodeState: (_status, data) => data.closed === true,
   },
 }

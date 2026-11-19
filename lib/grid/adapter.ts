@@ -2,10 +2,24 @@ import type { Edge, Node } from 'reactflow'
 import { EdgeModel } from './models/EdgeModel'
 import { NodeModel, NodeType } from './models/NodeModel'
 import { Side } from './models/PortModel'
+import { normalizeEdgeVoltage, normalizeNodeData } from './normalize'
 
-/**
- * tie 开关只有左右两个端口，handle 名由两端节点的相对位置推断。
- */
+export type GridModelIssue = {
+  code: 'TIE_DUPLICATE_TERMINAL' | 'TIE_PEER_NOT_BUS'
+  nodeId: string
+  edgeId?: string
+  message: string
+}
+
+/** 母联端子：只有左右两个，身份由 handle 名决定，不再依赖画布坐标 */
+export const parseTieTerminal = (handle: string | undefined): Side | undefined => {
+  if (!handle) return undefined
+  if (handle.startsWith('left')) return 'left'
+  if (handle.startsWith('right')) return 'right'
+  return undefined
+}
+
+/** 旧数据迁移：按两端相对位置补出 handle 名 */
 export const inferTieHandle = (tieNode: Node | undefined, otherNode: Node | undefined, kind: 'source' | 'target') => {
   if (!tieNode || !otherNode) return undefined
   return otherNode.position.x < tieNode.position.x ? `left-${kind}` : `right-${kind}`
@@ -24,11 +38,14 @@ export const inferSide = (nodeId: string, edge: Edge, isSource: boolean, nodeMap
   const node = nodeMap.get(nodeId)
   const otherId = isSource ? edge.target : edge.source
   const other = nodeMap.get(otherId)
-
   const handle = isSource ? edge.sourceHandle : edge.targetHandle
+
   if (node?.type === 'switch' && node?.data?.subType === 'tie') {
+    const terminal = parseTieTerminal(handle ?? undefined)
+    if (terminal) return terminal
+    // 旧数据兜底：由相对位置推断；无法判定时默认 left，并交给拓扑校验报错
     if (other && other.position.x < node.position.x) return 'left'
-    if (other) return 'right'
+    if (other && other.position.x > node.position.x) return 'right'
     return 'left'
   }
 
@@ -57,34 +74,64 @@ export const inferSide = (nodeId: string, edge: Edge, isSource: boolean, nodeMap
   return isSource ? 'bottom' : 'top'
 }
 
+/**
+ * 把 ReactFlow 画布翻译成端口模型。
+ * 母联的两条连线必须落在不同端子、且对端必须是母线；违反规则的连线会被剔除并记录 issue，
+ * 而不是静默地把两段母线并在同一个端子上（那会让母联断开也照样导通）。
+ */
 export const buildGridModels = (nodes: Node[], edges: Edge[]) => {
   const nodeMap = new Map(nodes.map((node) => [node.id, node]))
   const nodeModels = nodes.map((node) => {
     const type = (node.type || 'bus') as NodeType
-    return new NodeModel(
-      node.id,
-      type,
-      {
-        status: node.data?.status,
-        subType: node.data?.subType,
-        voltage: node.data?.voltage,
-        ratio: node.data?.ratio,
-        capacity: node.data?.capacity,
-        ratedCurrent: node.data?.ratedCurrent,
-      },
-      node.position
-    )
+    return new NodeModel(node.id, type, normalizeNodeData(type, node.data as Record<string, unknown>), node.position)
   })
-  const edgeModels = edges.map((edge) => {
+  const modelOf = new Map(nodeModels.map((model) => [model.id, model]))
+
+  const issues: GridModelIssue[] = []
+  const usedTerminals = new Map<string, Map<Side, string>>()
+
+  const claimTieTerminal = (tie: NodeModel, side: Side, edge: Edge, peer: Node | undefined) => {
+    if (peer?.type !== 'bus') {
+      issues.push({
+        code: 'TIE_PEER_NOT_BUS',
+        nodeId: tie.id,
+        edgeId: edge.id,
+        message: `母联「${tie.data.label ?? tie.id}」只能连接母线，当前接入了${peer?.type ?? '未知元件'}`,
+      })
+      return false
+    }
+    const used = usedTerminals.get(tie.id) ?? new Map<Side, string>()
+    usedTerminals.set(tie.id, used)
+    if (used.has(side)) {
+      issues.push({
+        code: 'TIE_DUPLICATE_TERMINAL',
+        nodeId: tie.id,
+        edgeId: edge.id,
+        message: `母联「${tie.data.label ?? tie.id}」的${side === 'left' ? '左' : '右'}端子接入了多条线路，该连线已忽略，请从另一端子重连`,
+      })
+      return false
+    }
+    used.set(side, edge.id)
+    return true
+  }
+
+  const edgeModels: EdgeModel[] = []
+  edges.forEach((edge) => {
+    const sourceModel = modelOf.get(edge.source)
+    const targetModel = modelOf.get(edge.target)
+    if (!sourceModel || !targetModel) return
+
     const sourceSide = inferSide(edge.source, edge, true, nodeMap)
     const targetSide = inferSide(edge.target, edge, false, nodeMap)
+
+    if (sourceModel.isTie() && !claimTieTerminal(sourceModel, sourceSide, edge, nodeMap.get(edge.target))) return
+    if (targetModel.isTie() && !claimTieTerminal(targetModel, targetSide, edge, nodeMap.get(edge.source))) return
+
     const sourcePortId = `${edge.source}:${sourceSide}`
     const targetPortId = `${edge.target}:${targetSide}`
-    const edgeVoltage = (edge.data as { voltage?: number } | undefined)?.voltage
-    const sourceVoltage = (nodeMap.get(edge.source)?.data as { voltage?: number } | undefined)?.voltage
-    const targetVoltage = (nodeMap.get(edge.target)?.data as { voltage?: number } | undefined)?.voltage
-    const voltage = edgeVoltage ?? sourceVoltage ?? targetVoltage
-    return new EdgeModel(edge.id, sourcePortId, targetPortId, voltage)
+    const voltage = normalizeEdgeVoltage(edge.data) ?? sourceModel.data.ratedVoltage ?? targetModel.data.ratedVoltage
+    edgeModels.push(new EdgeModel(edge.id, sourcePortId, targetPortId, voltage))
   })
-  return { nodeModels, edgeModels }
+
+  return { nodeModels, edgeModels, issues }
 }

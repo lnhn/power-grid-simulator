@@ -254,7 +254,7 @@ import { SwitchNode } from '@/components/nodes/SwitchNode'
 import { LoadNode } from '@/components/nodes/LoadNode'
 import { BusNode } from '@/components/nodes/BusNode'
 import { TransformerNode } from '@/components/nodes/TransformerNode'
-import { buildGridModels, GridSolver, NodeModel, inferSide, inferTieHandle, normalizeTieHandle } from '@/lib/grid'
+import { buildGridModels, GridSolver, NodeModel, inferSide, inferTieHandle, normalizeNodeData, normalizeTieHandle } from '@/lib/grid'
 import { Toast } from '@/components/Toast'
 
 const nodeTypes = {
@@ -471,16 +471,8 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
   }, [pushHistory])
 
   const toNodeModel = useCallback((node: Node) => {
-    return new NodeModel(
-      node.id,
-      (node.type || 'bus') as NodeModel['type'],
-      {
-        status: node.data?.status,
-        subType: node.data?.subType,
-        voltage: node.data?.voltage,
-      },
-      node.position
-    )
+    const type = (node.type || 'bus') as NodeModel['type']
+    return new NodeModel(node.id, type, normalizeNodeData(type, node.data), node.position)
   }, [])
 
   // 当前选中的单个节点（多选时取第一个），用于右侧属性面板
@@ -746,7 +738,11 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
       issues.push({ id: `node:${nodeId}:multi`, message: `节点 ${node.data?.label || nodeId} 输入端口连接了多条线路` })
     })
 
-    const { nodeModels, edgeModels } = buildGridModels(nodes, edges)
+    const { nodeModels, edgeModels, issues: modelIssues } = buildGridModels(nodes, edges)
+    modelIssues.forEach((issue) => {
+      issues.push({ id: `edge:${issue.edgeId ?? issue.nodeId}:${issue.code}`, message: issue.message })
+    })
+
     const result = GridSolver.solve(nodeModels, edgeModels)
 
     nodes.forEach((node) => {
@@ -876,7 +872,26 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
         return
       }
 
-      if (targetModel.type !== 'switch' || targetModel.data.subType !== 'tie') {
+      // 母联：只能接母线，每个端子只能接一条母线
+      const tieModel = sourceModel.isTie() ? sourceModel : targetModel.isTie() ? targetModel : null
+      if (tieModel) {
+        const peerModel = sourceModel.isTie() ? targetModel : sourceModel
+        const tieSide = sourceModel.isTie() ? sourceSide : targetSide
+        if (peerModel.type !== 'bus') {
+          setToast({ message: '母联只能连接母线', type: 'error' })
+          return
+        }
+        const occupied = edges.some((edge) => {
+          if (edge.source !== tieModel.id && edge.target !== tieModel.id) return false
+          return inferSide(tieModel.id, edge, edge.source === tieModel.id, nodeMap) === tieSide
+        })
+        if (occupied) {
+          setToast({ message: '该端子已连接一条母线，请从另一端子接入', type: 'error' })
+          return
+        }
+      }
+
+      if (!targetModel.isTie()) {
         const existingInput = edges.some((edge) => {
           if (edge.target !== target) return false
           const edgeTargetSide = inferSide(target, edge, false, nodeMap)
