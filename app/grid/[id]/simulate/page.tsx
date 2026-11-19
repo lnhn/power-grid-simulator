@@ -22,6 +22,8 @@ import { Toast } from '@/components/Toast'
 import { ConfirmModal } from '@/components/ConfirmModal'
 import { buildGridModels, GridSolver, voltageToColor, inferTieHandle, normalizeTieHandle, buildNodeRuntime } from '@/lib/grid'
 import type { SectionState, TieState } from '@/lib/grid'
+import { evaluateChecks, previewTieToggle } from '@/lib/grid'
+import type { GridCheck } from '@/lib/grid'
 
 const nodeTypes = {
   powerSource: SimulatePowerSourceNode,
@@ -67,7 +69,7 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
     message: string
     onConfirm: () => void
   }>({ open: false, title: '', message: '', onConfirm: () => {} })
-  const [summary, setSummary] = useState<{ sections: SectionState[]; ties: TieState[]; totalKw: number } | null>(null)
+  const [summary, setSummary] = useState<{ sections: SectionState[]; ties: TieState[]; totalKw: number; checks: GridCheck[] } | null>(null)
   const nodesRef = useRef<Node[]>([])
   const edgesRef = useRef<Edge[]>([])
   nodesRef.current = nodes
@@ -145,6 +147,7 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
           ...node.data,
           status: node.type === 'load' ? (node.data.status || 'stopped') : node.data.status,
           onToggle: node.type === 'switch' ? (nodeId: string) => handleSwitchToggle(nodeId) : undefined,
+          onPreview: node.type === 'switch' ? (nodeId: string, close: boolean) => buildPreview(nodeId, close) : undefined,
           onToggleLoad: node.type === 'load' ? (nodeId: string) => handleLoadToggle(nodeId) : undefined,
           onRequestConfirm: (opts: { title: string; message: string; onConfirm: () => void }) =>
             setConfirmModal({ open: true, ...opts }),
@@ -176,6 +179,13 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
     }
   }
 
+  /** 母联操作预演：返回将发生的结果，供确认弹窗展示 */
+  const buildPreview = (nodeId: string, close: boolean) => {
+    const { nodeModels, edgeModels } = buildGridModels(nodesRef.current, edgesRef.current)
+    const preview = previewTieToggle(nodeModels, edgeModels, nodeId, close)
+    return preview ? preview.lines : []
+  }
+
   const logOperation = async (action: string, targetId: string, details: string) => {
     try {
       const response = await fetch('/api/logs', {
@@ -199,6 +209,7 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
       console.error('Failed to log operation:', error)
     }
   }
+
   const handleSwitchToggle = (nodeId: string) => {
     const node = nodesRef.current.find((n) => n.id === nodeId)
     if (!node) return
@@ -259,6 +270,7 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
   const applyCircuitState = (currentNodes: Node[], currentEdges: Edge[]) => {
     const { nodeModels, edgeModels } = buildGridModels(currentNodes, currentEdges)
     const result = GridSolver.solve(nodeModels, edgeModels)
+    const checks = evaluateChecks(nodeModels, edgeModels, result)
     const runtime = buildNodeRuntime(nodeModels, result)
 
     const solvedNodes = currentNodes.map((node) => {
@@ -322,7 +334,7 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
 
     setNodes(solvedNodes)
     setEdges(solvedEdges)
-    setSummary({ sections: result.sections, ties: Array.from(result.ties.values()), totalKw: result.totalKw })
+    setSummary({ sections: result.sections, ties: Array.from(result.ties.values()), totalKw: result.totalKw, checks })
 
     return { nextNodes: solvedNodes, nextEdges: solvedEdges }
   }
@@ -351,6 +363,11 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
     unsafeParallel: { text: '危险并列', cls: 'bg-red-100 text-red-700' },
   }
 
+  const CHECK_CLASS: Record<string, string> = {
+    danger: 'rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-700',
+    warning: 'rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-700',
+    info: 'rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-[11px] text-gray-600',
+  }
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-gray-50 to-gray-100">
       {/* 顶部导航栏 */}
@@ -440,7 +457,6 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
                 </div>
                 <div className="text-xs text-purple-700 mt-1">运行 / 总数</div>
               </div>
-            </div>
               <div className="bg-gradient-to-br from-amber-50 to-amber-100 rounded-xl p-4 border border-amber-200">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs text-amber-700 font-semibold uppercase tracking-wide">总负荷</span>
@@ -450,6 +466,20 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
                 </div>
                 <div className="text-xs text-amber-700 mt-1">各段负荷合计</div>
               </div>
+            </div>
+            {summary && summary.checks.length > 0 && (
+              <div className="mt-6 pt-6 border-t border-gray-200">
+                <h3 className="text-sm font-bold text-gray-800 mb-3">运行校验</h3>
+                <div className="space-y-2">
+                  {summary.checks.map((check, index) => (
+                    <div key={index} className={CHECK_CLASS[check.severity] || CHECK_CLASS.info}>
+                      {check.message}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {summary && (
               <div className="mt-6 pt-6 border-t border-gray-200">
                 <h3 className="text-sm font-bold text-gray-800 mb-3">运行方式</h3>

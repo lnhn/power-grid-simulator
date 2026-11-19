@@ -69,6 +69,8 @@ export type GridSolveResult = {
   sections: SectionState[]
   /** 母联运行方式 */
   ties: Map<string, TieState>
+  /** 节点所属电气节点（分段）id */
+  nodeSection: Map<string, string>
   /** 每个负荷当前用电功率（kW） */
   loadKw: Map<string, number>
   /** 每个电源当前出力（kW，同段内平均分摊） */
@@ -246,6 +248,14 @@ export class GridSolver {
         if (kw > 0) section.loadCount += 1
       })
 
+    const nodeSection = new Map<string, string>()
+    nodes.forEach((node) => {
+      const rootTop = uf.find(`${node.id}:top`)
+      const rootBottom = uf.find(`${node.id}:bottom`)
+      if (sectionMap.has(rootTop)) nodeSection.set(node.id, rootTop)
+      else if (sectionMap.has(rootBottom)) nodeSection.set(node.id, rootBottom)
+    })
+
     let totalKw = 0
     const sourceOutput = new Map<string, number>()
     sectionMap.forEach((section) => {
@@ -307,6 +317,7 @@ export class GridSolver {
       loadKw: power.loadKw,
       sourceOutput,
       totalKw,
+      nodeSection,
     }
   }
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildGridModels, EdgeModel, GridSolver, NodeModel, normalizeNodeData } from '..'
+import { buildGridModels, EdgeModel, evaluateChecks, GridSolver, NodeModel, normalizeNodeData, previewTieToggle } from '..'
 
 const portId = (nodeId: string, side: 'top' | 'bottom' | 'left' | 'right') => `${nodeId}:${side}`
 
@@ -418,5 +418,76 @@ describe('power aggregation', () => {
     expect(result.edgeStates.get('e1')?.kw).toBe(100)
     expect(result.edgeStates.get('e1')?.amp).toBeCloseTo((100 * 1000) / (Math.sqrt(3) * 1000 * 0.85), 1)
     expect(result.edgeStates.get('e3')?.amp).toBeCloseTo((100 * 1000) / (Math.sqrt(3) * 400 * 0.85), 1)
+  })
+})
+
+describe('checks and tie preview', () => {
+  const busNode = (id: string, x: number, y: number, voltage = 380) => ({ id, type: 'bus', position: { x, y }, data: { voltage } })
+  const sourceNode = (id: string, x: number, y: number, voltage = 380) => ({ id, type: 'powerSource', position: { x, y }, data: { voltage } })
+  const tieNode = (status: string) => ({ id: 'tie', type: 'switch', position: { x: 600, y: 200 }, data: { subType: 'tie', status } })
+  const loadNode = (id: string, power: number, status: string, x: number, y: number) => ({
+    id,
+    type: 'load',
+    position: { x, y },
+    data: { status, power },
+  })
+
+  const build = (tieStatus: string, secondSourceVoltage?: number, loadPower?: number, ratedCurrent?: number) => {
+    const nodes: unknown[] = [sourceNode('ps1', 100, 80), busNode('busA', 300, 200), tieNode(tieStatus), busNode('busB', 900, 200)]
+    const edges: unknown[] = [
+      { id: 'e1', source: 'ps1', target: 'busA', sourceHandle: 'bottom', targetHandle: 'top' },
+      { id: 'e2', source: 'busA', target: 'tie', sourceHandle: 'right', targetHandle: 'left-target' },
+      { id: 'e3', source: 'tie', target: 'busB', sourceHandle: 'right-source', targetHandle: 'top' },
+    ]
+    if (secondSourceVoltage !== undefined) {
+      nodes.push(sourceNode('ps2', 1100, 80, secondSourceVoltage))
+      edges.push({ id: 'e4', source: 'ps2', target: 'busB', sourceHandle: 'bottom', targetHandle: 'top' })
+    }
+    if (loadPower !== undefined) {
+      nodes.push(loadNode('m', loadPower, 'running', 300, 360))
+      edges.push({ id: 'e5', source: 'busA', target: 'm', sourceHandle: 'bottom', targetHandle: 'top' })
+    }
+    if (ratedCurrent !== undefined) {
+      nodes.push({ id: 'k', type: 'switch', position: { x: 300, y: 290 }, data: { status: 'on', ratedCurrent } })
+      edges.push({ id: 'e6', source: 'busA', target: 'k', sourceHandle: 'bottom', targetHandle: 'top' })
+    }
+    return buildGridModels(asNodes(nodes), asEdges(edges))
+  }
+
+  it('flags unsafe parallel and voltage conflict', () => {
+    const { nodeModels, edgeModels } = build('on', 1000)
+    const result = GridSolver.solve(nodeModels, edgeModels)
+    const checks = evaluateChecks(nodeModels, edgeModels, result)
+    expect(checks.some((check) => check.code === 'TIE_UNSAFE_PARALLEL')).toBe(true)
+    expect(checks.some((check) => check.code === 'VOLTAGE_CONFLICT')).toBe(true)
+    expect(checks.some((check) => check.severity === 'danger')).toBe(true)
+  })
+
+  it('flags a switch overloaded by its section current', () => {
+    const { nodeModels, edgeModels } = build('off', 200, 150, 100)
+    const result = GridSolver.solve(nodeModels, edgeModels)
+    const checks = evaluateChecks(nodeModels, edgeModels, result)
+    expect(checks.some((check) => check.code === 'OVERLOAD_SWITCH')).toBe(true)
+  })
+
+  it('previews a safe parallel close with load sharing', () => {
+    const { nodeModels, edgeModels } = build('off', 380, 100)
+    const preview = previewTieToggle(nodeModels, edgeModels, 'tie', true)
+    expect(preview?.severity).toBe('info')
+    expect(preview?.lines.join('')).toContain('并列运行')
+    expect(preview?.lines.join('')).toContain('2 台电源')
+  })
+
+  it('refuses to preview a close between different voltages', () => {
+    const { nodeModels, edgeModels } = build('off', 1000)
+    const preview = previewTieToggle(nodeModels, edgeModels, 'tie', true)
+    expect(preview?.severity).toBe('danger')
+    expect(preview?.lines.join('')).toContain('禁止合环')
+  })
+
+  it('previews splitting when opening an already sectioned tie', () => {
+    const { nodeModels, edgeModels } = build('off', 380)
+    const preview = previewTieToggle(nodeModels, edgeModels, 'tie', false)
+    expect(preview?.lines.join('')).toContain('解列为两段')
   })
 })
