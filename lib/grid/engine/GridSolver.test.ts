@@ -228,3 +228,92 @@ describe('GridSolver', () => {
     expect(result.voltageConflict.size).toBe(0)
   })
 })
+describe('tie operation modes', () => {
+  const busNode = (id: string, x: number, y: number, voltage: number) => ({ id, type: 'bus', position: { x, y }, data: { voltage } })
+  const sourceNode = (id: string, x: number, y: number, voltage: number) => ({ id, type: 'powerSource', position: { x, y }, data: { voltage } })
+  const tieNode = (status: string) => ({ id: 'tie', type: 'switch', position: { x: 600, y: 200 }, data: { subType: 'tie', status } })
+
+  const build = (tieStatus: string, secondSourceVoltage?: number) => {
+    const nodes: unknown[] = [
+      sourceNode('ps1', 100, 80, 380),
+      busNode('busA', 300, 200, 380),
+      tieNode(tieStatus),
+      busNode('busB', 900, 200, 380),
+    ]
+    const edges: unknown[] = [
+      { id: 'e1', source: 'ps1', target: 'busA', sourceHandle: 'bottom', targetHandle: 'top' },
+      { id: 'e2', source: 'busA', target: 'tie', sourceHandle: 'right', targetHandle: 'left-target' },
+      { id: 'e3', source: 'tie', target: 'busB', sourceHandle: 'right-source', targetHandle: 'top' },
+    ]
+    if (secondSourceVoltage !== undefined) {
+      nodes.push(sourceNode('ps2', 1100, 80, secondSourceVoltage))
+      edges.push({ id: 'e4', source: 'ps2', target: 'busB', sourceHandle: 'bottom', targetHandle: 'top' })
+    }
+    return buildGridModels(asNodes(nodes), asEdges(edges))
+  }
+
+  it('reports sectioned operation when the tie is open between two sources', () => {
+    const { nodeModels, edgeModels } = build('off', 380)
+    const result = GridSolver.solve(nodeModels, edgeModels)
+    expect(result.ties.get('tie')?.mode).toBe('sectioned')
+    expect(result.nodePowered.get('busA')).toBe(true)
+    expect(result.nodePowered.get('busB')).toBe(true)
+    expect(result.sections).toHaveLength(2)
+    expect(result.voltageConflict.size).toBe(0)
+  })
+
+  it('reports parallel operation when closed with equal voltage', () => {
+    const { nodeModels, edgeModels } = build('on', 380)
+    const result = GridSolver.solve(nodeModels, edgeModels)
+    expect(result.ties.get('tie')?.mode).toBe('parallel')
+    expect(result.sections).toHaveLength(1)
+    expect(result.voltageConflict.size).toBe(0)
+  })
+
+  it('flags unsafe parallel when closing between different voltages', () => {
+    const { nodeModels, edgeModels } = build('on', 1000)
+    const result = GridSolver.solve(nodeModels, edgeModels)
+    expect(result.ties.get('tie')?.mode).toBe('unsafeParallel')
+    expect(result.voltageConflict.has('tie:left')).toBe(true)
+    expect(result.edgeStates.get('e1')?.conflict).toBe(true)
+  })
+
+  it('keeps the standby section energized after closing the tie', () => {
+    const openGrid = build('off')
+    const openResult = GridSolver.solve(openGrid.nodeModels, openGrid.edgeModels)
+    expect(openResult.ties.get('tie')?.mode).toBe('standby')
+    expect(openResult.nodePowered.get('busB')).toBe(false)
+
+    const closedGrid = build('on')
+    const closedResult = GridSolver.solve(closedGrid.nodeModels, closedGrid.edgeModels)
+    expect(closedResult.nodePowered.get('busB')).toBe(true)
+    expect(closedResult.ties.get('tie')?.rightVoltage).toBe(0)
+  })
+
+  it('does not flag a transformer step-down that matches the parallel source voltage', () => {
+    const nodes: unknown[] = [
+      sourceNode('ps1', 100, 60, 1000),
+      { id: 'tx', type: 'transformer', position: { x: 300, y: 140 }, data: { voltage: 1000, ratio: 0.4 } },
+      busNode('busA', 500, 240, 400),
+      busNode('busB', 900, 240, 400),
+      sourceNode('ps2', 1100, 160, 400),
+    ]
+    const edges: unknown[] = [
+      { id: 'e1', source: 'ps1', target: 'tx', sourceHandle: 'bottom', targetHandle: 'top' },
+      { id: 'e2', source: 'tx', target: 'busA', sourceHandle: 'bottom', targetHandle: 'top' },
+      { id: 'e3', source: 'busA', target: 'busB', sourceHandle: 'right', targetHandle: 'left' },
+      { id: 'e4', source: 'ps2', target: 'busB', sourceHandle: 'bottom', targetHandle: 'top' },
+    ]
+    const { nodeModels, edgeModels } = buildGridModels(asNodes(nodes), asEdges(edges))
+    const result = GridSolver.solve(nodeModels, edgeModels)
+    expect(result.voltageConflict.size).toBe(0)
+    expect(result.sections).toHaveLength(1)
+    expect(result.sections[0].voltage).toBe(400)
+  })
+
+  it('reports live voltage on energized edges', () => {
+    const { nodeModels, edgeModels } = build('off', 380)
+    const result = GridSolver.solve(nodeModels, edgeModels)
+    expect(result.edgeStates.get('e2')?.voltage).toBe(380)
+  })
+})
