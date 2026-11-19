@@ -43,6 +43,8 @@ export type GridSolveResult = {
   nodePowered: Map<string, boolean>
   nodeState: Map<string, boolean>
   portStatus: Map<string, Record<Side, boolean>>
+  /** 端口电位，键为 id:side */
+  portVoltages: Map<string, number>
   edgeStates: Map<string, EdgeState>
   distance: Map<string, number>
   /** 电位冲突的端口 id */
@@ -113,6 +115,7 @@ export class GridSolver {
     const nodePowered = new Map<string, boolean>()
     const nodeState = new Map<string, boolean>()
     const portStatus = new Map<string, Record<Side, boolean>>()
+    const portVoltages = new Map<string, number>()
 
     graph.nodes.forEach((node) => {
       const status: Record<Side, boolean> = {
@@ -122,6 +125,7 @@ export class GridSolver {
         right: portEnergized(`${node.id}:right`),
       }
       portStatus.set(node.id, status)
+      SIDES.forEach((side) => portVoltages.set(`${node.id}:${side}`, portVoltage(`${node.id}:${side}`)))
       nodePowered.set(node.id, node.computePowered(status))
       nodeState.set(node.id, node.computeNodeState(status))
     })
@@ -237,6 +241,7 @@ export class GridSolver {
       nodePowered,
       nodeState,
       portStatus,
+      portVoltages,
       edgeStates,
       distance,
       voltageConflict,

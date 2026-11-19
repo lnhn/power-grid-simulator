@@ -20,7 +20,8 @@ import { SimulateBusNode } from '@/components/nodes/SimulateBusNode'
 import { SimulateTransformerNode } from '@/components/nodes/SimulateTransformerNode'
 import { Toast } from '@/components/Toast'
 import { ConfirmModal } from '@/components/ConfirmModal'
-import { buildGridModels, GridSolver, voltageToColor, inferTieHandle, normalizeTieHandle } from '@/lib/grid'
+import { buildGridModels, GridSolver, voltageToColor, inferTieHandle, normalizeTieHandle, buildNodeRuntime } from '@/lib/grid'
+import type { SectionState, TieState } from '@/lib/grid'
 
 const nodeTypes = {
   powerSource: SimulatePowerSourceNode,
@@ -66,6 +67,7 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
     message: string
     onConfirm: () => void
   }>({ open: false, title: '', message: '', onConfirm: () => {} })
+  const [summary, setSummary] = useState<{ sections: SectionState[]; ties: TieState[] } | null>(null)
   const nodesRef = useRef<Node[]>([])
   const edgesRef = useRef<Edge[]>([])
   nodesRef.current = nodes
@@ -174,96 +176,6 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
     }
   }
 
-  const handleSwitchToggle = (nodeId: string) => {
-    const currentNodes = nodesRef.current
-    const node = currentNodes.find((n) => n.id === nodeId)
-    if (!node) return
-    const newStatus = node.data.status === 'on' ? 'off' : 'on'
-
-    // 只记录一次日志（不放在 setState 内，避免 React 双次调用导致重复记录）
-    logOperation(
-      newStatus === 'on' ? 'SWITCH_ON' : 'SWITCH_OFF',
-      nodeId,
-      `断路器${newStatus === 'on' ? '闭合' : '断开'}`
-    )
-
-    const nextNodes = nodesRef.current.map((n) =>
-      n.id === nodeId ? { ...n, data: { ...n.data, status: newStatus } } : n
-    )
-    // 求解后立即更新视图，再把求解结果写入数据库（不在 setState updater 内产生副作用）
-    const { nextNodes: solvedNodes, nextEdges } = applyCircuitState(nextNodes, edgesRef.current)
-    saveGridState(solvedNodes, nextEdges)
-  }
-
-  const handleLoadToggle = (nodeId: string) => {
-    const currentNodes = nodesRef.current
-    const node = currentNodes.find((n) => n.id === nodeId)
-    if (!node || !node.data.powered) return
-    const newStatus = node.data.status === 'running' ? 'stopped' : 'running'
-
-    // 只记录一次日志（不放在 setState 内，避免重复记录）
-    logOperation(
-      newStatus === 'running' ? 'LOAD_START' : 'LOAD_STOP',
-      nodeId,
-      `${node.data.label} ${newStatus === 'running' ? '启动' : '停止'}`
-    )
-
-    const nextNodes = nodesRef.current.map((n) =>
-      n.id === nodeId ? { ...n, data: { ...n.data, status: newStatus } } : n
-    )
-    // 求解后立即更新视图，再把求解结果写入数据库（不在 setState updater 内产生副作用）
-    const { nextNodes: solvedNodes, nextEdges } = applyCircuitState(nextNodes, edgesRef.current)
-    saveGridState(solvedNodes, nextEdges)
-  }
-
-  /** 将求解后的模拟状态写入数据库（节点/边仅保留可序列化字段） */
-  const saveGridState = useCallback(async (currentNodes: Node[], currentEdges: Edge[]) => {
-    const cleanNodes = currentNodes.map((node) => ({
-      id: node.id,
-      type: node.type,
-      position: node.position,
-      data: {
-        label: node.data.label,
-        status: node.data.status,
-        voltage: node.data.voltage,
-        current: node.data.current,
-        subType: node.data.subType,
-        power: node.data.power,
-        powered: node.data.powered,
-        ratio: node.data.ratio,
-        capacity: node.data.capacity,
-        ratedCurrent: node.data.ratedCurrent,
-      },
-    }))
-    const cleanEdges = currentEdges.map((edge) => ({
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      sourceHandle: edge.sourceHandle,
-      targetHandle: edge.targetHandle,
-      type: edge.type,
-      markerEnd: edge.markerEnd,
-      style: edge.style,
-      data: edge.data,
-    }))
-    try {
-      const res = await fetch(`/api/grids/${params.id}/state`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          nodes: JSON.stringify(cleanNodes),
-          edges: JSON.stringify(cleanEdges),
-        }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        console.error('Save grid state failed:', err)
-      }
-    } catch (e) {
-      console.error('Save grid state error:', e)
-    }
-  }, [params.id])
-
   const logOperation = async (action: string, targetId: string, details: string) => {
     try {
       const response = await fetch('/api/logs', {
@@ -287,25 +199,81 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
       console.error('Failed to log operation:', error)
     }
   }
+  const handleSwitchToggle = (nodeId: string) => {
+    const node = nodesRef.current.find((n) => n.id === nodeId)
+    if (!node) return
+    const nextStatus = node.data.status === 'on' ? 'off' : 'on'
+    const device = node.data.subType === 'tie' ? '母联' : '断路器'
 
-  /** 求解电路状态并刷新视图；返回求解后的节点与边，供调用方直接持久化 */
+    // 只记录一次日志（不放在 setState 内，避免 React 双次调用导致重复记录）
+    logOperation(
+      nextStatus === 'on' ? 'SWITCH_ON' : 'SWITCH_OFF',
+      nodeId,
+      `${device} ${node.data.label} ${nextStatus === 'on' ? '闭合' : '断开'}`
+    )
+
+    const nextNodes = nodesRef.current.map((n) =>
+      n.id === nodeId ? { ...n, data: { ...n.data, status: nextStatus, closed: nextStatus === 'on' } } : n
+    )
+    applyCircuitState(nextNodes, edgesRef.current)
+    // 只把"人操作的那个字段"写回设计数据，运行态不落库
+    void persistOperation(nodeId, { status: nextStatus, closed: nextStatus === 'on' })
+  }
+
+  const handleLoadToggle = (nodeId: string) => {
+    const node = nodesRef.current.find((n) => n.id === nodeId)
+    if (!node || !node.data.powered) return
+    const nextStatus = node.data.status === 'running' ? 'stopped' : 'running'
+
+    logOperation(
+      nextStatus === 'running' ? 'LOAD_START' : 'LOAD_STOP',
+      nodeId,
+      `${node.data.label} ${nextStatus === 'running' ? '启动' : '停止'}`
+    )
+
+    const nextNodes = nodesRef.current.map((n) =>
+      n.id === nodeId ? { ...n, data: { ...n.data, status: nextStatus, running: nextStatus === 'running' } } : n
+    )
+    applyCircuitState(nextNodes, edgesRef.current)
+    void persistOperation(nodeId, { status: nextStatus, running: nextStatus === 'running' })
+  }
+
+  /** 单设备操作落库：只提交本字段的设计态取值 */
+  const persistOperation = async (nodeId: string, patch: Record<string, unknown>) => {
+    try {
+      const res = await fetch(`/api/grids/${params.id}/operate`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nodeId, patch }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        console.error('Persist operation failed:', err)
+      }
+    } catch (e) {
+      console.error('Persist operation error:', e)
+    }
+  }
+
+  /** 求解并把运行态叠加到视图上：节点 design 字段保持原值，只写运行态字段 */
   const applyCircuitState = (currentNodes: Node[], currentEdges: Edge[]) => {
     const { nodeModels, edgeModels } = buildGridModels(currentNodes, currentEdges)
     const result = GridSolver.solve(nodeModels, edgeModels)
+    const runtime = buildNodeRuntime(nodeModels, result)
 
     const solvedNodes = currentNodes.map((node) => {
-      const powered = result.nodePowered.get(node.id) ?? false
-      const sides = ['top', 'bottom', 'left', 'right']
-      const conflict = sides.some((side) => result.voltageConflict.has(`${node.id}:${side}`))
+      const view = runtime.get(node.id)
       return {
         ...node,
         data: {
           ...node.data,
-          powered,
-          nodeState: result.nodeState.get(node.id),
-          voltage: powered ? (node.data?.voltage ?? 380) : 0,
-          portStatus: result.portStatus.get(node.id),
-          conflict,
+          powered: view?.powered ?? false,
+          nodeState: view?.nodeState ?? false,
+          portStatus: view?.portStatus,
+          conflict: view?.conflict ?? false,
+          liveVoltage: view?.voltage ?? 0,
+          sectionVoltage: view?.sectionVoltage,
+          tieMode: view?.tieMode,
         },
       }
     })
@@ -314,7 +282,7 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
       const state = result.edgeStates.get(edge.id)
       const active = state?.active ?? false
       const flow = state?.flow ?? 'none'
-      const voltage = state?.voltage ?? 380
+      const voltage = state?.voltage ?? 0
       const conflict = state?.conflict ?? false
       const loop = state?.loop ?? false
       const flowClass =
@@ -325,10 +293,15 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
         ...edge,
         animated: active,
         className: [edge.className, flowClass].filter(Boolean).join(' '),
+        label: active && voltage > 0 ? `${voltage}V` : undefined,
+        labelStyle: { fontSize: 10, fill: '#334155', fontWeight: 600 },
+        labelBgStyle: { fill: '#f8fafc', fillOpacity: 0.92 },
+        labelBgPadding: [4, 2] as [number, number],
+        labelBgBorderRadius: 4,
         style: {
           ...edge.style,
           stroke,
-          strokeWidth: conflict ? 3 : active ? 3 : 2,
+          strokeWidth: active ? 3 : 2,
           strokeDasharray: conflict ? '6 4' : (edge.style as { strokeDasharray?: string })?.strokeDasharray,
         },
         data: {
@@ -343,6 +316,7 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
 
     setNodes(solvedNodes)
     setEdges(solvedEdges)
+    setSummary({ sections: result.sections, ties: Array.from(result.ties.values()) })
 
     return { nextNodes: solvedNodes, nextEdges: solvedEdges }
   }
@@ -363,6 +337,13 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
   const closedSwitchCount = nodes.filter(n => n.type === 'switch' && n.data.status === 'on').length
   const loadCount = nodes.filter(n => n.type === 'load').length
   const runningLoadCount = nodes.filter(n => n.type === 'load' && n.data.status === 'running' && n.data.powered).length
+
+  const TIE_MODE_LABEL: Record<string, { text: string; cls: string }> = {
+    sectioned: { text: '分段运行', cls: 'bg-emerald-100 text-emerald-700' },
+    parallel: { text: '并列运行', cls: 'bg-blue-100 text-blue-700' },
+    standby: { text: '备用', cls: 'bg-amber-100 text-amber-700' },
+    unsafeParallel: { text: '危险并列', cls: 'bg-red-100 text-red-700' },
+  }
 
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-gray-50 to-gray-100">
@@ -454,6 +435,59 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
                 <div className="text-xs text-purple-700 mt-1">运行 / 总数</div>
               </div>
             </div>
+            {summary && (
+              <div className="mt-6 pt-6 border-t border-gray-200">
+                <h3 className="text-sm font-bold text-gray-800 mb-3">运行方式</h3>
+
+                <div className="space-y-2">
+                  {summary.ties.length === 0 ? (
+                    <p className="text-xs text-gray-500">无母联，全网单一电气节点</p>
+                  ) : (
+                    summary.ties.map((tie) => {
+                      const mode = TIE_MODE_LABEL[tie.mode] ?? TIE_MODE_LABEL.standby
+                      const label = nodes.find((n) => n.id === tie.id)?.data?.label ?? tie.id
+                      return (
+                        <div key={tie.id} className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold text-gray-800">{label}</span>
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${mode.cls}`}>
+                              {mode.text}
+                            </span>
+                          </div>
+                          <div className="mt-2 flex items-center justify-between text-[11px] text-gray-600">
+                            <span>
+                              左 {tie.leftVoltage ? `${tie.leftVoltage}V` : '失电'} · {tie.leftSources.length} 源
+                            </span>
+                            <span className="text-gray-300">|</span>
+                            <span>
+                              右 {tie.rightVoltage ? `${tie.rightVoltage}V` : '失电'} · {tie.rightSources.length} 源
+                            </span>
+                          </div>
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
+
+                <h4 className="mt-4 mb-2 text-xs font-semibold text-gray-600">电气分段</h4>
+                <div className="space-y-2">
+                  {summary.sections.map((section, index) => (
+                    <div
+                      key={section.id}
+                      className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2"
+                    >
+                      <span className="text-[11px] text-gray-600">
+                        第 {index + 1} 段 · {section.busIds.length} 条母线
+                      </span>
+                      <span className={`text-[11px] font-bold ${section.energized ? 'text-emerald-600' : 'text-gray-400'}`}>
+                        {section.energized ? `${section.voltage}V` : '失电'}
+                      </span>
+                    </div>
+                  ))}
+                  {summary.sections.length === 0 && <p className="text-xs text-gray-500">尚未布置母线</p>}
+                </div>
+              </div>
+            )}
 
             <div className="mt-6 pt-6 border-t border-gray-200">
               <h3 className="text-sm font-semibold text-gray-700 mb-3">💡 操作指南</h3>

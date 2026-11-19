@@ -31,7 +31,7 @@ export const SimulateBusNode = memo(({ data }: NodeProps) => {
         }`}>
           <div className="flex items-center space-x-1">
             <div className={`w-1.5 h-1.5 rounded-full ${isPowered ? 'bg-green-300 animate-pulse' : 'bg-gray-300'}`}></div>
-            <span>{isPowered ? '带电' : '停止'}</span>
+            <span>{isPowered ? (data.liveVoltage ? `带电 · ${data.liveVoltage}V` : '带电') : '停止'}</span>
           </div>
         </div>
       </div>

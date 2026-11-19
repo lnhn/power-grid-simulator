@@ -10,6 +10,17 @@ export const SimulateSwitchNode = memo(({ data, id }: NodeProps) => {
   const bottomPowered = portStatus.bottom ?? isPowered
   const leftPowered = portStatus.left ?? isPowered
   const rightPowered = portStatus.right ?? isPowered
+  const tieMode = data.tieMode as string | undefined
+  const tieBadge =
+    tieMode === 'parallel'
+      ? { text: '母联 · 并列', cls: 'bg-blue-100 text-blue-700' }
+      : tieMode === 'unsafeParallel'
+        ? { text: '母联 · 危险并列', cls: 'bg-red-100 text-red-700' }
+        : tieMode === 'sectioned'
+          ? { text: '母联 · 分段', cls: 'bg-emerald-100 text-emerald-700' }
+          : tieMode === 'standby'
+            ? { text: '母联 · 备用', cls: 'bg-amber-100 text-amber-700' }
+            : { text: '母联', cls: 'bg-emerald-100 text-emerald-700' }
   
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -56,8 +67,8 @@ export const SimulateSwitchNode = memo(({ data, id }: NodeProps) => {
           </div>
         </div>
         {isTie && (
-          <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
-            母联
+          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${tieBadge.cls}`}>
+            {tieBadge.text}
           </span>
         )}
       </div>
