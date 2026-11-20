@@ -41,3 +41,6 @@ next-env.d.ts
 
 # 打包产物
 *.zip
+
+# 工具临时目录
+.workbuddy/
