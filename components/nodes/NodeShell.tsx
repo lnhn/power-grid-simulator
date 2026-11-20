@@ -27,6 +27,10 @@ export type NodeShellProps = {
   icon: ReactNode
   /** 图标底板强调色（默认用皮肤 accent） */
   iconTone?: string
+  /** 图标底板底色（开关闭合/断开等需要跟着状态变底色） */
+  iconBackground?: string
+  /** 副标题颜色（开关"闭合/断开"要带语义色） */
+  subtitleTone?: string
   /** 右侧角标：运行 / 母联 / 停运 */
   badge?: ReactNode
   onDelete?: () => void
@@ -44,6 +48,8 @@ export function NodeShell({
   caption,
   icon,
   iconTone,
+  iconBackground,
+  subtitleTone,
   badge,
   onDelete,
   children,
@@ -64,7 +70,7 @@ export function NodeShell({
             color: iconTone ?? tokens.accent,
           }
         : {
-            background: iconTone ? `${iconTone}1f` : tokens.accentSoft,
+            background: iconBackground ?? (iconTone ? `${iconTone}1f` : tokens.accentSoft),
             borderRadius: `calc(var(--pg-radius) * 0.6)`,
             padding: 6,
             color: iconTone ?? tokens.accent,
@@ -144,7 +150,7 @@ export function NodeShell({
             {title}
           </div>
           {subtitle && (
-            <div className="truncate" style={{ color: 'var(--pg-muted)', fontSize: shape.subtitleSize, lineHeight: 1.4 }}>
+            <div className="truncate" style={{ color: subtitleTone ?? 'var(--pg-muted)', fontSize: shape.subtitleSize, lineHeight: 1.4, fontWeight: subtitleTone ? 500 : 400 }}>
               {subtitle}
             </div>
           )}

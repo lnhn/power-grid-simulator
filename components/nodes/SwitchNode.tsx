@@ -28,8 +28,10 @@ export const SwitchNode = memo(({ data, selected }: NodeProps<GridNode>) => {
       tone={isOn ? ON : undefined}
       title={data.label}
       subtitle={isOn ? '● 闭合' : '○ 断开'}
+      subtitleTone={stateColor}
       icon={<SymbolIcon kind="switch" on={isOn} tie={isTie} color={stateColor} />}
-      iconTone={isOn ? undefined : '#94a3b8'}
+      iconTone={stateColor}
+      iconBackground={isOn ? 'rgba(22,163,74,0.12)' : 'var(--pg-panel-muted)'}
       badge={
         isTie ? (
           <span
