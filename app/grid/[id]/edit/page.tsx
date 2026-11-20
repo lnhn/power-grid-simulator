@@ -267,7 +267,7 @@ import { SwitchNode } from '@/components/nodes/SwitchNode'
 import { LoadNode } from '@/components/nodes/LoadNode'
 import { BusNode } from '@/components/nodes/BusNode'
 import { TransformerNode } from '@/components/nodes/TransformerNode'
-import { buildGridModels, GridSolver, NodeModel, inferSide, inferTieHandle, normalizeNodeData, normalizeTieHandle, type GridNode, type GridEdge } from '@/lib/grid'
+import { buildGridModels, GridSolver, NodeModel, inferSide, inferTieHandle, normalizeNodeData, normalizeTieHandle, lintTopology, autoLayout, toPersistedNodes, toPersistedEdges, summarizeLint, type GridNode, type GridEdge } from '@/lib/grid'
 import { Toast } from '@/components/Toast'
 
 const nodeTypes = {
@@ -735,7 +735,7 @@ export default function EditGridPage() {
 
   // 校验为纯计算（含一次整图求解），仅在节点/连线变化后防抖执行，避免拖拽时每帧求解
   const computeValidation = useCallback(() => {
-    const issues: { id: string; message: string }[] = []
+    const issues: { id: string; message: string; severity?: 'danger' | 'warning' | 'info' }[] = []
     if (nodes.length === 0) return issues
     const nodeMap = new Map(nodes.map((node) => [node.id, node]))
     const inputCounts = new Map<string, number>()
@@ -781,6 +781,12 @@ export default function EditGridPage() {
       issues.push({ id: `edge:${issue.edgeId ?? issue.nodeId}:${issue.code}`, message: issue.message })
     })
 
+    const lintIssues = lintTopology(nodeModels, edgeModels)
+    lintIssues.forEach((issue) => {
+      const anchor = issue.nodeIds[0] ?? issue.edgeIds[0] ?? 'grid'
+      issues.push({ id: 'lint:' + issue.code + ':' + anchor, message: issue.message, severity: issue.severity })
+    })
+
     const result = GridSolver.solve(nodeModels, edgeModels)
 
     nodes.forEach((node) => {
@@ -797,7 +803,7 @@ export default function EditGridPage() {
     return issues
   }, [nodes, edges, toNodeModel, showUnpowered])
 
-  const [validation, setValidation] = useState<{ id: string; message: string }[]>([])
+  const [validation, setValidation] = useState<{ id: string; message: string; severity?: 'danger' | 'warning' | 'info' }[]>([])
 
   useEffect(() => {
     const timer = setTimeout(() => setValidation(computeValidation()), 250)
@@ -1170,50 +1176,30 @@ export default function EditGridPage() {
     []
   )
 
+  /** 一键整理：只改坐标，不动拓扑 */
+  const handleAutoLayout = () => {
+    const layout = autoLayout(nodes)
+    setNodes((nds) =>
+      nds.map((node) => {
+        const position = layout.get(node.id)
+        return position ? { ...node, position } : node
+      })
+    )
+    setToast({ message: '已按 电源→变压器→母线→开关→负荷 重排', type: 'success' })
+  }
+
   const handleSave = async () => {
+    // 结构性问题（悬空线、母联单侧、电源无出线）先拦住，避免把画错的图存成"正式图"
+    const blocking = computeValidation().filter((item) => item.severity === 'danger')
+    if (blocking.length > 0) {
+      setToast({ message: '有 ' + blocking.length + ' 项必须修复：' + blocking[0].message, type: 'error' })
+      return
+    }
     setSaving(true)
     try {
-      // 清理节点数据，移除函数引用
-      const cleanNodes = nodes.map(node => ({
-        id: node.id,
-        type: node.type,
-        position: node.position,
-        data: {
-          label: node.data.label,
-          status: node.data.status,
-          voltage: node.data.voltage,
-          current: node.data.current,
-          subType: node.data.subType,
-          power: node.data.power,
-          ratio: node.data.ratio,
-          capacity: node.data.capacity,
-          ratedCurrent: node.data.ratedCurrent,
-        },
-      }))
-
-      const cleanEdges = edges.map(edge => {
-        const sourceNode = nodes.find((n) => n.id === edge.source)
-        const targetNode = nodes.find((n) => n.id === edge.target)
-        const sourceIsTie = sourceNode?.type === 'switch' && sourceNode?.data?.subType === 'tie'
-        const targetIsTie = targetNode?.type === 'switch' && targetNode?.data?.subType === 'tie'
-        const sourceHandle = sourceIsTie
-          ? (edge.sourceHandle ? normalizeTieHandle(edge.sourceHandle, 'source') : inferTieHandle(sourceNode, targetNode, 'source'))
-          : edge.sourceHandle
-        const targetHandle = targetIsTie
-          ? (edge.targetHandle ? normalizeTieHandle(edge.targetHandle, 'target') : inferTieHandle(targetNode, sourceNode, 'target'))
-          : edge.targetHandle
-        return ({
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        sourceHandle,
-        targetHandle,
-        type: edge.type,
-        markerEnd: edge.markerEnd,
-        style: edge.style,
-        data: edge.data,
-        })
-      })
+      // 用统一的持久化投影：只剥运行态，保留 ratedVoltage / inService / closed / running 等设计参数
+      const cleanNodes = toPersistedNodes(nodes as never)
+      const cleanEdges = toPersistedEdges(edges as never)
 
       const response = await fetch(`/api/grids/${gridId}`, {
         method: 'PUT',
@@ -1454,6 +1440,8 @@ export default function EditGridPage() {
     )
   }
 
+  const blockingCount = validation.filter((item) => item.severity === 'danger').length
+
   return (
     <div className="h-screen flex flex-col bg-gray-50">
       {/* 顶部工具栏 */}
@@ -1509,6 +1497,12 @@ export default function EditGridPage() {
                 删除
               </button>
             </div>
+            <button
+              onClick={handleAutoLayout}
+              className="px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 transition"
+            >
+              一键整理
+            </button>
             <button
               onClick={handleSave}
               disabled={saving}
@@ -1767,9 +1761,9 @@ export default function EditGridPage() {
                       {validationCollapsed ? '展开' : '折叠'}
                     </button>
                     <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                      validation.length === 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                      blockingCount > 0 ? 'bg-red-100 text-red-700' : validation.length > 0 ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'
                     }`}>
-                      {validation.length === 0 ? '通过' : `${validation.length} 项`}
+                      {validation.length === 0 ? '通过' : blockingCount > 0 ? `${blockingCount} 项必须修复` : `${validation.length} 项提示`}
                     </span>
                   </div>
                 </div>
@@ -1778,13 +1772,20 @@ export default function EditGridPage() {
                 ) : validation.length === 0 ? (
                   <div className="text-xs text-gray-500">未发现问题</div>
                 ) : (
-                  <ul className="space-y-1 text-xs text-red-600">
-                    {validation.slice(0, 6).map((issue) => (
-                      <li key={issue.id} className="flex items-start space-x-2">
-                        <span className="mt-1 h-1.5 w-1.5 rounded-full bg-red-500"></span>
+                  <ul className="space-y-1 text-xs">
+                    {validation.slice(0, 6).map((issue) => {
+                      const dot = issue.severity === 'danger' ? 'bg-red-500' : issue.severity === 'info' ? 'bg-blue-400' : 'bg-amber-400'
+                      const tone = issue.severity === 'danger' ? 'text-red-600' : issue.severity === 'info' ? 'text-blue-600' : 'text-amber-700'
+                      return (
+                      <li key={issue.id} className={'flex items-start space-x-2 ' + tone}>
+                        <span className={'mt-1 h-1.5 w-1.5 rounded-full ' + dot}></span>
                         <button
                           type="button"
                           onClick={() => {
+                            if (issue.id.startsWith('lint:')) {
+                              selectNodeById(issue.id.split(':')[2])
+                              return
+                            }
                             if (issue.id.startsWith('edge:')) {
                               const edgeId = issue.id.split(':')[1]
                               selectEdgeById(edgeId)
@@ -1800,7 +1801,8 @@ export default function EditGridPage() {
                           {issue.message}
                         </button>
                       </li>
-                    ))}
+                      )
+                    })}
                     {validation.length > 6 && (
                       <li className="text-[10px] text-red-500">仅显示前 6 条，请调整后再查看。</li>
                     )}

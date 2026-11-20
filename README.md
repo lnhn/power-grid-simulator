@@ -136,7 +136,7 @@ power-grid-simulator/
 | `GridEvent` | 运行事件（告警产生/消失）：级别、代码、目标元件、快照、`tenantId` |
 | `Equipment` | 设备台账，保存电网时由节点同步生成（含子类型/功率/电压/电流） |
 
-## 已知限制（v2.7.0）
+## 已知限制（v2.8.0）
 
 仍然是**电气语义模拟器**，以下边界如实记录：
 
@@ -160,6 +160,32 @@ power-grid-simulator/
 - v2.6.0 完成 Next 16 安全升级，异步 `params`、Flat Config ESLint 与跨租户校验均已回归验证；
 - v2.7.0 完成 React 19 + XYFlow 13 迁移，画布渲染、带电状态与操作确认链路已用无头浏览器回归；同期落地 M3 核心：运行事件差分落库、电源失电故障注入（仅内存）与负荷趋势采样。
 
+## 部署
+
+### 本地生产模式
+
+```bash
+npm ci
+npx prisma generate
+npx prisma db push
+npm run seed          # 需要先在 .env 设置 SEED_PASSWORD
+npm run build
+npm run start
+```
+
+### Docker
+
+```bash
+# 必须提供两个密钥，缺一个就拒绝启动
+export NEXTAUTH_SECRET="$(openssl rand -base64 32)"
+export SEED_PASSWORD="换成你自己的初始口令"
+
+docker compose up -d --build
+docker compose exec power-grid npx tsx prisma/seed.ts   # 首次初始化账号
+```
+
+数据库文件挂在 `./data/dev.db`，容器重建不丢数据。备份只需复制该文件（先停容器）。
+
 ## 开发
 
 ```bash
@@ -173,3 +199,4 @@ npm run build     # 依赖升级后已验证通过
 ## 许可证
 
 MIT
+

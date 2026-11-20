@@ -14,3 +14,6 @@ export type { CheckSeverity, GridCheck, OperationPreview } from './engine/checks
 export { powerToCurrent } from './engine/power'
 export { checkKey, checkTarget, diffChecks, summarizeChecks } from './engine/events'
 export type { GridEventInput, GridEventState } from './engine/events'
+export { hasBlockingIssue, lintTopology, summarizeLint } from './engine/lint'
+export type { LintSeverity, TopologyIssue } from './engine/lint'
+export { autoLayout } from './layout'

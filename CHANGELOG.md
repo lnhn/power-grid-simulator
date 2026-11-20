@@ -1,5 +1,27 @@
 # 更新日志
 
+
+## v2.8.0 - 拓扑 lint、一键整理与部署收尾
+
+这一版解决"画错了但保存成功"的问题，并把交付形态补上。
+
+### 编辑体验（M5）
+- 新增 `lib/grid/engine/lint.ts`：悬空连线、母联单侧接线、电源无出线、母线无接线、孤立元件、端子复用、自环，共 7 类规则
+- 校验分 danger / warning：danger 在保存前拦截并提示第一条原因，warning 只显示不阻塞
+- 校验面板按严重级着色，点击条目可定位到对应元件
+- 保存改用 `toPersistedNodes / toPersistedEdges`：修掉手工白名单丢失 `ratedVoltage`、`inService` 的问题
+- 新增 `lib/grid/layout.ts` 与"一键整理"按钮：按 电源→变压器→母线→开关→负荷 重排，只改坐标
+
+### 测试与文档（M6）
+- 新增 `matrix.test.ts`：分段、并列、变压器降压、电源停运、变压器变比冲突五个结构回归
+- 新增 `docs/SECURITY.md`：角色矩阵、租户隔离、字段白名单、响应头、未做的安全项
+- 删除长期无人调用的 `/api/grids/[id]/state`（会把运行态写回设计数据的隐患路由）
+
+### 部署
+- 新增 `Dockerfile`（三阶段）与 `docker-compose.yml`（SQLite 挂载 `/data`，缺密钥拒绝启动）
+- 新增 `.dockerignore`，README 增加"部署"章节
+
+测试：53 → 58（新增 lint 8 例、matrix 5 例）
 ## v2.7.0 - React 19 / XYFlow 13 迁移与 M3 监控演练核心
 
 消除 Next 16 对 React 18 的弃用告警，完成画布库与 React 生态的现代化升级，并落地 M3 监控演练的核心能力。
