@@ -309,6 +309,7 @@ export default function EditGridPage() {
   const isRestoringRef = useRef(false)
   const clipboardRef = useRef<{ nodes: Node[]; edges: Edge[]; mode: 'copy' | 'cut' } | null>(null)
   const historyTimerRef = useRef<number | null>(null)
+  const [historyState, setHistoryState] = useState({ canUndo: false, canRedo: false })
   const nodesRef = useRef<Node[]>([])
   const edgesRef = useRef<Edge[]>([])
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
@@ -337,6 +338,7 @@ export default function EditGridPage() {
     }
     historyRef.current = stack
     historyIndexRef.current = stack.length - 1
+    setHistoryState({ canUndo: historyIndexRef.current > 0, canRedo: false })
   }, [])
 
   const restoreHistory = useCallback((index: number) => {
@@ -348,6 +350,7 @@ export default function EditGridPage() {
     setEdges(snapshot.edges)
     isRestoringRef.current = false
     historyIndexRef.current = index
+    setHistoryState({ canUndo: index > 0, canRedo: index < stack.length - 1 })
   }, [setNodes, setEdges])
 
   const handleUndo = useCallback(() => {
@@ -790,6 +793,7 @@ export default function EditGridPage() {
   const [liveMode, setLiveMode] = useState(false)
   const [snapshot, setSnapshot] = useState<{ result: GridSolveResult; runtime: Map<string, NodeRuntimeView> } | null>(null)
   const lastSolveRef = useRef<{ result: GridSolveResult; runtime: Map<string, NodeRuntimeView> } | null>(null)
+  const selectedLive = selectedNode && snapshot ? snapshot.runtime.get(selectedNode.id) : undefined
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -1169,12 +1173,13 @@ export default function EditGridPage() {
   /** 一键整理：只改坐标，不动拓扑；整理后自动 fitView，让整张图落在视野里 */
   const handleAutoLayout = () => {
     const layout = autoLayout(nodes, edges)
-    setNodes((nds) =>
-      nds.map((node) => {
-        const position = layout.get(node.id)
-        return position ? { ...node, position } : node
-      })
-    )
+    const nextNodes = nodes.map((node) => {
+      const position = layout.get(node.id)
+      return position ? { ...node, position } : node
+    })
+    // 整理也算一步可撤销的操作，避免手滑后没法退回
+    pushHistory(nextNodes, edges)
+    setNodes(nextNodes)
     window.requestAnimationFrame(() => {
       rfInstance?.fitView({ padding: 0.18, duration: 400 })
     })
@@ -1365,6 +1370,29 @@ export default function EditGridPage() {
           </div>
           
           <div className="flex items-center space-x-3">
+            <div className="flex items-center space-x-1">
+              <button
+                onClick={handleUndo}
+                disabled={!historyState.canUndo}
+                title="撤销 (Ctrl+Z)"
+                className="px-2 py-2 text-sm rounded-lg border pg-border pg-text hover:bg-[var(--pg-surface)] transition disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14l-4-4 4-4M5 10h9a6 6 0 010 12H9" />
+                </svg>
+              </button>
+              <button
+                onClick={handleRedo}
+                disabled={!historyState.canRedo}
+                title="重做 (Ctrl+Shift+Z)"
+                className="px-2 py-2 text-sm rounded-lg border pg-border pg-text hover:bg-[var(--pg-surface)] transition disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 14l4-4-4-4M19 10H10a6 6 0 000 12h5" />
+                </svg>
+              </button>
+            </div>
+            <div className="h-6 w-px bg-gray-300" />
             <div className="flex items-center space-x-2">
               <button
                 onClick={handleCopy}
@@ -1827,6 +1855,42 @@ export default function EditGridPage() {
                   />
                 </div>
 
+                {/* 母线：电压等级（决定该段母线的运行电位） */}
+                {selectedNode.type === 'bus' && (
+                  <div>
+                    <label className="block text-xs font-medium pg-muted mb-1.5">电压等级 (V)</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={35000}
+                      value={selectedNode.data?.voltage || 380}
+                      onChange={(e) => updateSelectedNodeData({ voltage: toNumberInput(e.target.value, 380) })}
+                      className="w-full px-3 py-2 border pg-border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                    />
+                  </div>
+                )}
+
+                {/* 开关：类型（断路器 / 母联） */}
+                {selectedNode.type === 'switch' && (
+                  <div>
+                    <label className="block text-xs font-medium pg-muted mb-1.5">类型</label>
+                    <select
+                      value={selectedNode.data?.subType === 'tie' ? 'tie' : 'breaker'}
+                      onChange={(e) => {
+                        const subType = e.target.value
+                        updateSelectedNodeData({ subType })
+                      }}
+                      className="w-full px-3 py-2 border pg-border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                    >
+                      <option value="breaker">断路器</option>
+                      <option value="tie">母联</option>
+                    </select>
+                    {selectedNode.data?.subType === 'tie' && (
+                      <p className="mt-1 text-[10px] pg-muted">母联只有左右两个端子，必须分别接到两段不同的母线。</p>
+                    )}
+                  </div>
+                )}
+
                 {/* 断路器：状态 */}
                 {selectedNode.type === 'switch' && (
                   <div>
@@ -1934,19 +1998,42 @@ export default function EditGridPage() {
                   </>
                 )}
 
-                {/* 电源：电压 */}
+                {/* 电源：电压 / 类型 / 投运 */}
                 {selectedNode.type === 'powerSource' && (
-                  <div>
-                    <label className="block text-xs font-medium pg-muted mb-1.5">电压 (V)</label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={1000}
-                      value={selectedNode.data?.voltage ?? 380}
-                      onChange={(e) => updateSelectedNodeData({ voltage: toNumberInput(e.target.value, 380) })}
-                      className="w-full px-3 py-2 border pg-border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                    />
-                  </div>
+                  <>
+                    <div>
+                      <label className="block text-xs font-medium pg-muted mb-1.5">电压 (V)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={1000}
+                        value={selectedNode.data?.voltage || 380}
+                        onChange={(e) => updateSelectedNodeData({ voltage: toNumberInput(e.target.value, 380) })}
+                        className="w-full px-3 py-2 border pg-border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium pg-muted mb-1.5">电源类型</label>
+                      <select
+                        value={selectedNode.data?.kind ?? 'grid'}
+                        onChange={(e) => updateSelectedNodeData({ kind: e.target.value })}
+                        className="w-full px-3 py-2 border pg-border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                      >
+                        <option value="grid">市电接入</option>
+                        <option value="generator">发电机</option>
+                        <option value="ups">UPS</option>
+                      </select>
+                    </div>
+                    <label className="flex items-center space-x-2 text-xs pg-text">
+                      <input
+                        type="checkbox"
+                        checked={selectedNode.data?.inService !== false}
+                        onChange={(e) => updateSelectedNodeData({ inService: e.target.checked })}
+                        className="w-4 h-4 accent-blue-600"
+                      />
+                      <span>投运（取消勾选视为检修停用）</span>
+                    </label>
+                  </>
                 )}
 
                 {selectedNode.type === 'transformer' && (
@@ -1957,7 +2044,7 @@ export default function EditGridPage() {
                         type="number"
                         min={1}
                         max={100000}
-                        value={selectedNode.data?.voltage ?? 380}
+                        value={selectedNode.data?.voltage || 380}
                         onChange={(e) => updateSelectedNodeData({ voltage: toNumberInput(e.target.value, 380) })}
                         className="w-full px-3 py-2 border pg-border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                       />
@@ -1987,6 +2074,61 @@ export default function EditGridPage() {
                   </>
                 )}
               </div>
+
+              {liveMode && selectedLive && (
+                <div className="mt-4 pt-4 border-t pg-border">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold pg-text">运行态</span>
+                    <span className="text-[10px] pg-muted">
+                      {selectedLive.powered ? '带电' : '失电'}
+                    </span>
+                  </div>
+                  <dl className="space-y-1.5 text-xs">
+                    <div className="flex justify-between">
+                      <dt className="pg-muted">运行电压</dt>
+                      <dd className="pg-text font-semibold">{Math.round(selectedLive.voltage)} V</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="pg-muted">端子带电</dt>
+                      <dd className="pg-text font-semibold">
+                        {Object.values(selectedLive.portStatus).filter(Boolean).length} / 4
+                      </dd>
+                    </div>
+                    {selectedLive.sectionVoltage !== undefined && (
+                      <div className="flex justify-between">
+                        <dt className="pg-muted">所在分段</dt>
+                        <dd className="pg-text font-semibold">{Math.round(selectedLive.sectionVoltage)} V</dd>
+                      </div>
+                    )}
+                    {selectedNode.type === 'load' && (
+                      <div className="flex justify-between">
+                        <dt className="pg-muted">实际负荷</dt>
+                        <dd className="pg-text font-semibold">{Math.round(selectedLive.loadKw ?? 0)} kW</dd>
+                      </div>
+                    )}
+                    {selectedNode.type === 'powerSource' && (
+                      <div className="flex justify-between">
+                        <dt className="pg-muted">当前出力</dt>
+                        <dd className="pg-text font-semibold">{Math.round(selectedLive.sourceKw ?? 0)} kW</dd>
+                      </div>
+                    )}
+                    {selectedLive.tieMode && (
+                      <div className="flex justify-between">
+                        <dt className="pg-muted">母联方式</dt>
+                        <dd className="pg-text font-semibold">
+                          {selectedLive.tieMode === 'parallel' ? '并列' : selectedLive.tieMode === 'unsafeParallel' ? '危险并列' : selectedLive.tieMode === 'sectioned' ? '分段' : '备用'}
+                        </dd>
+                      </div>
+                    )}
+                    {selectedLive.conflict && (
+                      <div className="flex justify-between">
+                        <dt className="pg-muted">提示</dt>
+                        <dd className="font-semibold" style={{ color: '#dc2626' }}>电位冲突</dd>
+                      </div>
+                    )}
+                  </dl>
+                </div>
+              )}
 
               <p className="mt-4 text-xs pg-muted">点击画布空白处取消选择</p>
             </div>
