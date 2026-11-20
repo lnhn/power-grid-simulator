@@ -1,4 +1,16 @@
 # 更新日志
+## v2.10.2 - 3D 孪生第一步：场景映射纯函数
+
+先不引渲染库，把「2D 单线图 + 求解结果 → 3D 场景数据」这一步单独拆出来，能单测、能在没 GPU 的环境里验证画得对不对。
+
+### 新增
+- `lib/twin/geometry.ts`：柜体尺寸参数表（电源柜 / 开关柜 / 联络柜 / 变压器柜 / 母排 / 负荷标识），`METER_PER_PX = 0.025`，母排安装高度 2.6 m
+- `lib/twin/scene.ts`：`buildTwinScene(nodes, edges, result)` → 设备列表 + 电缆列表 + 包围盒；坐标只做线性映射（2D x→3D x，2D y→3D z），柜体落地、母排悬空，带电 / 冲突 / 功率全部取自 `GridSolveResult`
+- `lib/twin/scene.test.ts`：6 例，覆盖设备与节点一一对应、尺寸取自参数表、深度单调、运行态不重算、悬空端点剔除、包围盒包住所有设备
+
+### 说明
+- 这一层不依赖 three，3D 只负责画，不负责算电；后续换皮肤只换材质，不动尺寸与语义色
+- `npx tsc --noEmit` / `npx eslint .` 无错，`npx vitest run` 76 例全绿
 
 
 
