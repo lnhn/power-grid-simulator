@@ -55,6 +55,21 @@ export function lintTopology(nodes: NodeModel[], edges: EdgeModel[]): TopologyIs
       })
     }
 
+    // 两段母线直接连线：电气上等价于并成一段，单线图里通常是想画母联
+    const fromNode = nodeMap.get(from.nodeId)
+    const toNode = nodeMap.get(to.nodeId)
+    if (fromNode?.type === 'bus' && toNode?.type === 'bus') {
+      issues.push({
+        code: 'BUS_BUS_DIRECT',
+        severity: 'warning',
+        message:
+          '母线「' + (fromNode.data.label ?? fromNode.id) + '」与「' + (toNode.data.label ?? toNode.id) +
+          '」直接相连，电气上等价于合并为一段；若要分段运行，请改用母联开关',
+        nodeIds: [fromNode.id, toNode.id],
+        edgeIds: [edge.id],
+      })
+    }
+
     bump(portCounts, edge.sourcePortId)
     bump(portCounts, edge.targetPortId)
     bump(nodeEdgeCount, from.nodeId)

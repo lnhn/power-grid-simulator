@@ -40,6 +40,15 @@ describe('拓扑 lint', () => {
     expect(issues.some((issue) => issue.code === 'TERMINAL_MULTI_EDGE')).toBe(true)
   })
 
+  it('两段母线直连给出提示（建议改用母联）', () => {
+    const nodes = [node('b1', 'bus'), node('b2', 'bus')]
+    const edges = [new EdgeModel('e1', 'b1:right', 'b2:left')]
+    const issues = lintTopology(nodes, edges)
+    const issue = issues.find((item) => item.code === 'BUS_BUS_DIRECT')
+    expect(issue?.severity).toBe('warning')
+    expect(issue?.nodeIds).toEqual(['b1', 'b2'])
+  })
+
   it('悬空连线判为必须修复', () => {
     const issues = lintTopology([node('ps', 'powerSource')], [new EdgeModel('e1', 'ps:bottom', 'ghost:top')])
     expect(issues.find((issue) => issue.code === 'EDGE_UNKNOWN_NODE')?.severity).toBe('danger')

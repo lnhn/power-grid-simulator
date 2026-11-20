@@ -314,6 +314,9 @@ export default function EditGridPage() {
   const edgesRef = useRef<Edge[]>([])
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const [hasClipboard, setHasClipboard] = useState(false)
+  /** 已保存的设计态快照，用来判断"有没有未保存的修改" */
+  const savedSnapshotRef = useRef<string>('')
+  const [dirty, setDirty] = useState(false)
 
   // 同步最新画布到 ref，供事件回调读取；在 effect 中写入避免渲染期变更 ref
   useEffect(() => {
@@ -322,6 +325,28 @@ export default function EditGridPage() {
   useEffect(() => {
     edgesRef.current = edges
   }, [edges])
+
+  const designSnapshot = useCallback(
+    (n: Node[], e: Edge[]) => JSON.stringify({ nodes: toPersistedNodes(n as never), edges: toPersistedEdges(e as never) }),
+    []
+  )
+
+  // 只在加载完成后比较，避免初始空画布误判为"已修改"
+  useEffect(() => {
+    if (!savedSnapshotRef.current) return
+    setDirty(designSnapshot(nodes, edges) !== savedSnapshotRef.current)
+  }, [nodes, edges, designSnapshot])
+
+  // 有未保存修改时，关闭/刷新页面前给一次拦阻
+  useEffect(() => {
+    if (!dirty) return
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [dirty])
 
 
   const pushHistory = useCallback((nextNodes: Node[], nextEdges: Edge[]) => {
@@ -867,6 +892,8 @@ export default function EditGridPage() {
       
       setNodes(parsedNodes)
       setEdges(parsedEdges)
+      savedSnapshotRef.current = designSnapshot(parsedNodes, parsedEdges)
+      setDirty(false)
     } catch (error) {
       console.error('Failed to fetch grid:', error)
     } finally {
@@ -1210,6 +1237,8 @@ export default function EditGridPage() {
       })
 
       if (response.ok) {
+        savedSnapshotRef.current = designSnapshot(nodes, edges)
+        setDirty(false)
         setToast({ message: '保存成功！', type: 'success' })
       } else {
         const errorData = await response.json().catch(() => ({}))
@@ -1433,7 +1462,10 @@ export default function EditGridPage() {
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
               </svg>
-              <span>{saving ? '保存中...' : '保存'}</span>
+              <span className="flex items-center space-x-1.5">
+                {dirty && <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#f59e0b' }} title="有未保存的修改" />}
+                <span>{saving ? '保存中...' : '保存'}</span>
+              </span>
             </button>
             <button
               onClick={() => setLiveMode((prev) => !prev)}
