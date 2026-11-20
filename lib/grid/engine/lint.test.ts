@@ -52,18 +52,21 @@ describe('拓扑 lint', () => {
 })
 
 describe('一键整理', () => {
-  it('按类型分排并保留横向顺序', () => {
+  it('分层清晰、同排不重叠，且保留原横向顺序', () => {
     const layout = autoLayout([
       { id: 'ps2', type: 'powerSource', position: { x: 300, y: 0 } },
       { id: 'ps1', type: 'powerSource', position: { x: 100, y: 0 } },
       { id: 'bus', type: 'bus', position: { x: 0, y: 0 } },
       { id: 'load', type: 'load', position: { x: 0, y: 0 } },
     ])
-    expect(layout.get('ps1')?.x).toBe(0)
-    expect(layout.get('ps2')?.x).toBe(220)
-    expect(layout.get('ps1')?.y).toBe(0)
-    expect(layout.get('bus')?.y).toBe(280)
-    expect(layout.get('load')?.y).toBe(560)
+    const y = (id: string) => layout.get(id)!.y
+    const x = (id: string) => layout.get(id)!.x
+    // 电源在最上，母线居中，负荷在下
+    expect(y('ps1')).toBeLessThan(y('bus'))
+    expect(y('bus')).toBeLessThan(y('load'))
+    // 同一排的两台电源左右排开、不重叠，且原 x 小的仍在左边
+    expect(y('ps1')).toBe(y('ps2'))
+    expect(x('ps2') - x('ps1')).toBeGreaterThanOrEqual(240)
   })
 
   it('母联与母线同排', () => {
@@ -72,6 +75,6 @@ describe('一键整理', () => {
       { id: 'b2', type: 'bus', position: { x: 1, y: 0 } },
       { id: 'tie', type: 'switch', data: { subType: 'tie' }, position: { x: 0, y: 0 } },
     ])
-    expect(layout.get('tie')?.y).toBe(280)
+    expect(Math.abs(layout.get('tie')!.y - layout.get('b1')!.y)).toBeLessThanOrEqual(4)
   })
-})
+});

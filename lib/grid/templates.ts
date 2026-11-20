@@ -34,8 +34,8 @@ const edge = (id: string, source: string, target: string, sourceHandle = 'bottom
   targetHandle,
 })
 
-const place = (nodes: FlowNode[]): FlowNode[] => {
-  const layout = autoLayout(nodes)
+const place = (nodes: FlowNode[], edges: FlowEdge[] = []): FlowNode[] => {
+  const layout = autoLayout(nodes, edges)
   return nodes.map((item) => {
     const position = layout.get(item.id)
     return position ? { ...item, position } : item
@@ -45,26 +45,24 @@ const place = (nodes: FlowNode[]): FlowNode[] => {
 /** 所有模板都跑一次一键整理，保证新建出来的图不是一坨叠在一起 */
 export function buildTemplate(id: GridTemplateId): { nodes: FlowNode[]; edges: FlowEdge[] } {
   if (id === 'single-bus') {
-    const nodes = place([
+    const nodes: FlowNode[] = [
       node('ps1', 'powerSource', { label: '1# 进线', voltage: 380 }),
       node('bus1', 'bus', { label: '车间母线' }),
       node('load1', 'load', { label: '1# 泵', status: 'running', power: 75 }),
       node('load2', 'load', { label: '2# 风机', status: 'running', power: 45 }),
       node('load3', 'load', { label: '3# 压缩机', status: 'stopped', power: 110 }),
-    ])
-    return {
-      nodes,
-      edges: [
+    ]
+    const edges: FlowEdge[] = [
         edge('e1', 'ps1', 'bus1'),
         edge('e2', 'bus1', 'load1'),
         edge('e3', 'bus1', 'load2'),
         edge('e4', 'bus1', 'load3'),
-      ],
-    }
+    ]
+    return { nodes: place(nodes, edges), edges }
   }
 
   if (id === 'sectional-tie') {
-    const nodes = place([
+    const nodes: FlowNode[] = [
       node('ps1', 'powerSource', { label: '1# 进线', voltage: 380 }),
       node('ps2', 'powerSource', { label: '2# 进线', voltage: 380 }),
       node('busA', 'bus', { label: 'A 段母线' }),
@@ -72,37 +70,33 @@ export function buildTemplate(id: GridTemplateId): { nodes: FlowNode[]; edges: F
       node('tie', 'switch', { label: '母联', subType: 'tie', status: 'off' }),
       node('loadA', 'load', { label: 'A 段负荷', status: 'running', power: 80 }),
       node('loadB', 'load', { label: 'B 段负荷', status: 'running', power: 60 }),
-    ])
-    return {
-      nodes,
-      edges: [
+    ]
+    const edges: FlowEdge[] = [
         edge('e1', 'ps1', 'busA'),
         edge('e2', 'ps2', 'busB'),
         edge('e3', 'busA', 'tie', 'right', 'left-target'),
         edge('e4', 'tie', 'busB', 'right-source', 'top'),
         edge('e5', 'busA', 'loadA'),
         edge('e6', 'busB', 'loadB'),
-      ],
-    }
+    ]
+    return { nodes: place(nodes, edges), edges }
   }
 
   if (id === 'transformer-infeed') {
-    const nodes = place([
+    const nodes: FlowNode[] = [
       node('ps1', 'powerSource', { label: '950V 进线', voltage: 950 }),
       node('tr1', 'transformer', { label: '1# 变压器', ratio: 0.4 }),
       node('bus1', 'bus', { label: '380V 母线' }),
       node('load1', 'load', { label: '1# 泵', status: 'running', power: 75 }),
       node('load2', 'load', { label: '2# 风机', status: 'running', power: 45 }),
-    ])
-    return {
-      nodes,
-      edges: [
+    ]
+    const edges: FlowEdge[] = [
         edge('e1', 'ps1', 'tr1'),
         edge('e2', 'tr1', 'bus1'),
         edge('e3', 'bus1', 'load1'),
         edge('e4', 'bus1', 'load2'),
-      ],
-    }
+    ]
+    return { nodes: place(nodes, edges), edges }
   }
 
   return { nodes: [], edges: [] }

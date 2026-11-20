@@ -1166,16 +1166,19 @@ export default function EditGridPage() {
     []
   )
 
-  /** 一键整理：只改坐标，不动拓扑 */
+  /** 一键整理：只改坐标，不动拓扑；整理后自动 fitView，让整张图落在视野里 */
   const handleAutoLayout = () => {
-    const layout = autoLayout(nodes)
+    const layout = autoLayout(nodes, edges)
     setNodes((nds) =>
       nds.map((node) => {
         const position = layout.get(node.id)
         return position ? { ...node, position } : node
       })
     )
-    setToast({ message: '已按 电源→变压器→母线→开关→负荷 重排', type: 'success' })
+    window.requestAnimationFrame(() => {
+      rfInstance?.fitView({ padding: 0.18, duration: 400 })
+    })
+    setToast({ message: '已按电气层级重排：电源在上、母线居中、负荷在下', type: 'success' })
   }
 
   const handleSave = async () => {
