@@ -89,7 +89,7 @@ export default function SimulateGridPage() {
   // Next 16 中页面 params 为 Promise，客户端组件统一通过 useParams 读取
   const { id: gridId } = useParams<{ id: string }>()
   const { status } = useSession()
-  const { tokens } = useSkin()
+  const { tokens, mode } = useSkin()
   const router = useRouter()
   const [nodes, setNodes, onNodesChange] = useNodesState<GridNode>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<GridEdge>([])
@@ -535,7 +535,7 @@ export default function SimulateGridPage() {
 
   if (status === 'loading' || loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
+      <div className="min-h-screen flex items-center justify-center" style={{ background: tokens.bg }}>
         <div className="text-center">
           <div className="inline-block animate-spin rounded-full h-16 w-16 border-4 border-blue-500 border-t-transparent"></div>
           <p className="mt-4 pg-muted font-medium">加载中...</p>
@@ -569,7 +569,7 @@ export default function SimulateGridPage() {
   const CHECK_CLASS: Record<string, string> = {
     danger: 'rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-700',
     warning: 'rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-700',
-    info: 'rounded-lg border pg-border bg-gray-50 px-3 py-2 text-[11px] pg-muted',
+    info: 'rounded-lg border pg-border pg-surface px-3 py-2 text-[11px] pg-muted',
   }
   return (
     <div className="h-screen flex flex-col" style={{ background: tokens.bg }}>
@@ -595,7 +595,7 @@ export default function SimulateGridPage() {
             </div>
               <button
                 onClick={() => router.push('/settings')}
-                className="px-4 py-2 rounded-lg font-medium border pg-border pg-text hover:bg-gray-50"
+                className="px-4 py-2 rounded-lg font-medium border pg-border pg-text hover:bg-[var(--pg-surface)]"
               >
                 外观
               </button>
@@ -606,7 +606,7 @@ export default function SimulateGridPage() {
                 className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-medium transition shadow-sm ${
                   showLogs
                     ? 'bg-blue-500 text-white'
-                    : 'pg-panel border pg-border pg-text hover:bg-gray-50'
+                    : 'pg-panel border pg-border pg-text hover:bg-[var(--pg-surface)]'
                 }`}
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -672,9 +672,9 @@ export default function SimulateGridPage() {
             </h2>
             
             <div className="space-y-3">
-              <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-4 border border-blue-200">
+              <div className="pg-panel rounded-xl p-4 border pg-border">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs text-blue-700 font-semibold uppercase tracking-wide">电源</span>
+                  <span className="text-xs pg-muted font-semibold uppercase tracking-wide">电源</span>
                   <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                   </svg>
@@ -682,9 +682,9 @@ export default function SimulateGridPage() {
                 <div className="text-2xl font-bold text-blue-900">{powerSourceCount}</div>
               </div>
 
-              <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-xl p-4 border border-green-200">
+              <div className="pg-panel rounded-xl p-4 border pg-border">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs text-green-700 font-semibold uppercase tracking-wide">断路器</span>
+                  <span className="text-xs pg-muted font-semibold uppercase tracking-wide">断路器</span>
                   <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
@@ -695,9 +695,9 @@ export default function SimulateGridPage() {
                 <div className="text-xs text-green-700 mt-1">闭合 / 总数</div>
               </div>
 
-              <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl p-4 border border-purple-200">
+              <div className="pg-panel rounded-xl p-4 border pg-border">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs text-purple-700 font-semibold uppercase tracking-wide">用电设备</span>
+                  <span className="text-xs pg-muted font-semibold uppercase tracking-wide">用电设备</span>
                   <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                   </svg>
@@ -707,9 +707,9 @@ export default function SimulateGridPage() {
                 </div>
                 <div className="text-xs text-purple-700 mt-1">运行 / 总数</div>
               </div>
-              <div className="bg-gradient-to-br from-amber-50 to-amber-100 rounded-xl p-4 border border-amber-200">
+              <div className="pg-panel rounded-xl p-4 border pg-border">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs text-amber-700 font-semibold uppercase tracking-wide">总负荷</span>
+                  <span className="text-xs pg-muted font-semibold uppercase tracking-wide">总负荷</span>
                 </div>
                 <div className="text-2xl font-bold text-amber-900">
                   {summary ? summary.totalKw.toFixed(0) : 0} <span className="text-sm">kW</span>
@@ -811,7 +811,7 @@ export default function SimulateGridPage() {
                       const mode = TIE_MODE_LABEL[tie.mode] ?? TIE_MODE_LABEL.standby
                       const label = nodes.find((n) => n.id === tie.id)?.data?.label ?? tie.id
                       return (
-                        <div key={tie.id} className="rounded-lg border pg-border bg-gray-50 p-3">
+                        <div key={tie.id} className="rounded-lg border pg-border pg-surface p-3">
                           <div className="flex items-center justify-between">
                             <span className="text-xs font-semibold pg-text">{label}</span>
                             <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${mode.cls}`}>
@@ -856,19 +856,19 @@ export default function SimulateGridPage() {
             <div className="mt-6 pt-6 border-t pg-border">
               <h3 className="text-sm font-semibold pg-text mb-3">💡 操作指南</h3>
               <div className="space-y-2 text-xs pg-muted">
-                <div className="flex items-start space-x-2 p-2 bg-blue-50 rounded">
+                <div className="flex items-start space-x-2 p-2 pg-surface rounded">
                   <div className="w-2 h-2 bg-blue-500 rounded-full mt-1"></div>
                   <p>点击<strong>断路器</strong>切换开关状态</p>
                 </div>
-                <div className="flex items-start space-x-2 p-2 bg-green-50 rounded">
+                <div className="flex items-start space-x-2 p-2 pg-surface rounded">
                   <div className="w-2 h-2 bg-green-500 rounded-full mt-1"></div>
                   <p>点击<strong>用电设备</strong>启动/停止</p>
                 </div>
-                <div className="flex items-start space-x-2 p-2 bg-purple-50 rounded">
+                <div className="flex items-start space-x-2 p-2 pg-surface rounded">
                   <div className="w-2 h-2 bg-purple-500 rounded-full mt-1"></div>
                   <p>蓝色动画线表示<strong>电流流动</strong></p>
                 </div>
-                <div className="flex items-start space-x-2 p-2 bg-amber-50 rounded">
+                <div className="flex items-start space-x-2 p-2 pg-surface rounded">
                   <div className="w-2 h-2 bg-amber-500 rounded-full mt-1"></div>
                   <p>所有操作都会<strong>自动记录</strong></p>
                 </div>
@@ -889,17 +889,18 @@ export default function SimulateGridPage() {
             nodesConnectable={false}
             elementsSelectable={false}
             fitView
-            className="bg-gradient-to-br from-gray-50 to-gray-100"
+            style={{ background: `radial-gradient(1100px 620px at 18% -8%, ${tokens.accentSoft} 0%, transparent 58%), ${tokens.bg}` }}
           >
-            <Background color={tokens.grid} gap={20} size={1} />
+            <Background id="minor" color={tokens.grid} gap={20} size={1} />
+            <Background id="major" color={tokens.border} gap={100} size={2} />
             <Controls showInteractive={false} />
             <MiniMap
               nodeColor={(node) => {
                 if (node.data.powered && node.type === 'load' && node.data.status === 'running') return '#10b981'
                 if (node.data.powered) return '#3b82f6'
-                return '#9ca3af'
+                return '#94a3b8'
               }}
-              maskColor="rgba(0, 0, 0, 0.1)"
+              maskColor={mode === 'dark' ? 'rgba(11,18,32,0.55)' : 'rgba(241,245,249,0.55)'}
             />
           </ReactFlow>
         </div>
@@ -944,7 +945,7 @@ export default function SimulateGridPage() {
                 logs.map((log) => {
                   const isStart = log.action.includes('ON') || log.action.includes('START')
                   return (
-                    <div key={log.id} className="bg-gray-50 rounded-lg p-3 border pg-border hover:shadow-md transition">
+                    <div key={log.id} className="pg-surface rounded-lg p-3 border pg-border hover:shadow-md transition">
                       <div className="flex items-start justify-between mb-2">
                         <span className={`px-2 py-1 rounded-md text-xs font-bold ${
                           isStart

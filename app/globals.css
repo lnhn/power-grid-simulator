@@ -189,3 +189,17 @@ body {
 .pg-text { color: var(--pg-text); }
 .pg-muted { color: var(--pg-muted); }
 .pg-font { font-family: var(--pg-font); }
+
+/* XYFlow 13 会按系统深色偏好给背景层上深色底，这里统一交回皮肤控制 */
+.react-flow__background { background-color: transparent !important; }
+.react-flow__minimap { background-color: var(--pg-surface) !important; }
+.react-flow__controls-button { background: var(--pg-panel); border-bottom: 1px solid var(--pg-panel-border); color: var(--pg-text); }
+.react-flow__controls-button:hover { background: var(--pg-panel-muted); }
+
+.pg-chip { background: var(--pg-panel-muted); border: 1px solid var(--pg-panel-border); }
+.pg-chip:hover { border-color: var(--pg-accent); }
+
+/* 画布容器：只负责裁剪，背景由 ReactFlow 的 style 决定 */
+.pg-canvas {
+  overflow: hidden;
+}

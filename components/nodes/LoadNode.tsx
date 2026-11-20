@@ -1,10 +1,12 @@
 import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import type { GridNode } from '@/lib/grid'
+import { useSkin } from '@/components/SkinProvider'
 
 export const LoadNode = memo(({ data, selected }: NodeProps<GridNode>) => {
+  const { tokens } = useSkin()
   const getLoadIcon = () => {
-    const iconClass = 'w-5 h-5 text-white'
+    const iconClass = 'w-5 h-5'
     const common = {
       fill: 'none',
       stroke: 'currentColor',
@@ -105,24 +107,20 @@ export const LoadNode = memo(({ data, selected }: NodeProps<GridNode>) => {
     }
   }
 
-  const getLoadColor = () => {
-    const colors: Record<string, string> = {
-      pump: 'from-cyan-500 to-cyan-600 border-cyan-400',
-      fan: 'from-sky-500 to-sky-600 border-sky-400',
-      compressor: 'from-purple-500 to-purple-600 border-purple-400',
-      heater: 'from-red-500 to-red-600 border-red-400',
-      oilPump: 'from-orange-500 to-orange-600 border-orange-400',
-      oilHeater: 'from-rose-500 to-rose-600 border-rose-400',
-      electricHeatTracing: 'from-yellow-500 to-yellow-600 border-yellow-400',
-      expander: 'from-teal-500 to-teal-600 border-teal-400',
-      cryogenicPump: 'from-blue-500 to-blue-600 border-blue-400',
-      other: 'from-amber-500 to-amber-600 border-amber-400',
-    }
-    return colors[data.subType || 'pump'] || 'from-amber-500 to-amber-600 border-amber-400'
-  }
+
+  const statusRunning = data.status === 'running'
 
   return (
-    <div className={`relative bg-gradient-to-br ${getLoadColor()} rounded-lg shadow-lg px-6 py-3 min-w-[240px] border-2`}>
+    <div
+      className="relative px-5 py-3 min-w-[240px] border-2"
+      style={{
+        background: 'var(--pg-panel)',
+        borderColor: selected ? tokens.accent : 'var(--pg-panel-border)',
+        borderRadius: 'var(--pg-radius)',
+        boxShadow: selected ? `0 0 0 3px ${tokens.accentSoft}` : tokens.canvasShadow,
+        fontFamily: 'var(--pg-font)',
+      }}
+    >
       {selected && (
         <button
           type="button"
@@ -130,32 +128,45 @@ export const LoadNode = memo(({ data, selected }: NodeProps<GridNode>) => {
             event.stopPropagation()
             data?.onDelete?.()
           }}
-          className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-white text-gray-700 border border-gray-200 shadow hover:bg-gray-50"
+          className="absolute -top-2 -right-2 w-6 h-6 rounded-full shadow text-sm leading-none"
+          style={{ background: 'var(--pg-panel)', border: '1px solid var(--pg-panel-border)', color: 'var(--pg-muted)' }}
           aria-label="删除节点"
         >
           ×
         </button>
       )}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <div className="bg-white/20 p-2 rounded-lg">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span
+            className="p-1.5"
+            style={{ background: tokens.accentSoft, borderRadius: 'calc(var(--pg-radius) * 0.6)', color: tokens.accent }}
+          >
             {getLoadIcon()}
-          </div>
+          </span>
           <div>
-            <div className="font-bold text-white text-sm">{data.label}</div>
+            <div className="font-bold text-sm" style={{ color: 'var(--pg-text)' }}>{data.label}</div>
+            {'power' in data && data.power != null && (
+              <div className="text-xs" style={{ color: 'var(--pg-muted)' }}>{data.power} kW</div>
+            )}
           </div>
         </div>
+        {statusRunning && (
+          <span
+            className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+            style={{ background: 'rgba(22,163,74,0.14)', color: '#16a34a' }}
+          >
+            运行
+          </span>
+        )}
       </div>
-      
+
       {/* 只有顶部输入 */}
       <Handle
         type="target"
         position={Position.Top}
-        className="!bg-yellow-400 !w-4 !h-4 !border-2 !border-white"
-        style={{ top: -8 }}
+        style={{ width: 14, height: 14, background: tokens.accent, border: '2px solid var(--pg-panel)', top: -8 }}
       />
     </div>
   )
 })
-
 LoadNode.displayName = 'LoadNode'

@@ -267,7 +267,8 @@ import { SwitchNode } from '@/components/nodes/SwitchNode'
 import { LoadNode } from '@/components/nodes/LoadNode'
 import { BusNode } from '@/components/nodes/BusNode'
 import { TransformerNode } from '@/components/nodes/TransformerNode'
-import { buildGridModels, GridSolver, NodeModel, inferSide, inferTieHandle, normalizeNodeData, normalizeTieHandle, lintTopology, autoLayout, toPersistedNodes, toPersistedEdges, summarizeLint, type GridNode, type GridEdge } from '@/lib/grid'
+import { useSkin } from '@/components/SkinProvider'
+import { buildGridModels, GridSolver, NodeModel, inferSide, inferTieHandle, normalizeNodeData, normalizeTieHandle, lintTopology, autoLayout, toPersistedNodes, toPersistedEdges, type GridNode, type GridEdge } from '@/lib/grid'
 import { Toast } from '@/components/Toast'
 
 const nodeTypes = {
@@ -287,6 +288,7 @@ export default function EditGridPage() {
   const { id: gridId } = useParams<{ id: string }>()
   const { data: session, status } = useSession()
   const router = useRouter()
+  const { tokens, mode } = useSkin()
   const [nodes, setNodes, baseOnNodesChange] = useNodesState<GridNode>([])
   const [edges, setEdges, baseOnEdgesChange] = useEdgesState<GridEdge>([])
   const [gridName, setGridName] = useState('')
@@ -935,7 +937,8 @@ export default function EditGridPage() {
           }
         }
 
-        if (!targetModel.isTie()) {
+        // 母线是等电位汇流点，允许多路进线；其余节点保持一个输入端子一条线
+        if (!targetModel.isTie() && targetModel.type !== 'bus') {
           const existingInput = eds.some((edge) => {
             if (edge.target !== target) return false
             const edgeTargetSide = inferSide(target, edge, false, nodeMap)
@@ -955,7 +958,7 @@ export default function EditGridPage() {
           targetHandle: params.targetHandle,
           type: 'smoothstep', // 曼哈顿式连线
           markerEnd: { type: MarkerType.ArrowClosed },
-          style: { strokeWidth: 2, stroke: '#64748b' },
+          style: { strokeWidth: 2, stroke: tokens.edgeIdle },
           animated: false,
           data: {
             controlOffsetX: 0,
@@ -971,7 +974,7 @@ export default function EditGridPage() {
         return next
       })
     },
-    [setEdges, pushHistory, toNodeModel]
+    [setEdges, pushHistory, toNodeModel, tokens.edgeIdle]
   )
 
   const addNode = (type: string, subType?: string, position?: { x: number; y: number }) => {
@@ -1248,143 +1251,6 @@ export default function EditGridPage() {
     [baseOnEdgesChange, scheduleHistoryPush]
   )
 
-  // 对齐功能
-  const alignNodes = useCallback((direction: 'left' | 'right' | 'top' | 'bottom' | 'center-h' | 'center-v') => {
-    const selectedNodes = nodes.filter(node => node.selected)
-    if (selectedNodes.length < 2) return
-
-    setNodes((nds) =>
-      nds.map((node) => {
-        if (!node.selected) return node
-
-        const newPosition = { ...node.position }
-
-        switch (direction) {
-          case 'left':
-            newPosition.x = Math.min(...selectedNodes.map(n => n.position.x))
-            break
-          case 'right':
-            newPosition.x = Math.max(...selectedNodes.map(n => n.position.x))
-            break
-          case 'top':
-            newPosition.y = Math.min(...selectedNodes.map(n => n.position.y))
-            break
-          case 'bottom':
-            newPosition.y = Math.max(...selectedNodes.map(n => n.position.y))
-            break
-          case 'center-h':
-            const avgX = selectedNodes.reduce((sum, n) => sum + n.position.x, 0) / selectedNodes.length
-            newPosition.x = avgX
-            break
-          case 'center-v':
-            const avgY = selectedNodes.reduce((sum, n) => sum + n.position.y, 0) / selectedNodes.length
-            newPosition.y = avgY
-            break
-        }
-
-        return { ...node, position: newPosition }
-      })
-    )
-  }, [nodes, setNodes])
-
-  // 均匀分布
-  const distributeNodes = useCallback((direction: 'horizontal' | 'vertical') => {
-    const selectedNodes = nodes.filter(node => node.selected).sort((a, b) =>
-      direction === 'horizontal' ? a.position.x - b.position.x : a.position.y - b.position.y
-    )
-    if (selectedNodes.length < 3) return
-
-    const first = selectedNodes[0]
-    const last = selectedNodes[selectedNodes.length - 1]
-    const totalSpace = direction === 'horizontal'
-      ? last.position.x - first.position.x
-      : last.position.y - first.position.y
-    const gap = totalSpace / (selectedNodes.length - 1)
-
-    setNodes((nds) =>
-      nds.map((node) => {
-        const index = selectedNodes.findIndex(n => n.id === node.id)
-        if (index === -1 || index === 0 || index === selectedNodes.length - 1) return node
-
-        const newPosition = { ...node.position }
-        if (direction === 'horizontal') {
-          newPosition.x = first.position.x + gap * index
-        } else {
-          newPosition.y = first.position.y + gap * index
-        }
-
-        return { ...node, position: newPosition }
-      })
-    )
-  }, [nodes, setNodes])
-
-  const SNAP_GRID = 15
-  /** 选中节点对齐到网格 */
-  const snapNodesToGrid = useCallback(() => {
-    const selectedNodes = nodes.filter(n => n.selected)
-    if (selectedNodes.length === 0) return
-    setNodes((nds) =>
-      nds.map((node) => {
-        if (!node.selected) return node
-        const x = Math.round(node.position.x / SNAP_GRID) * SNAP_GRID
-        const y = Math.round(node.position.y / SNAP_GRID) * SNAP_GRID
-        return { ...node, position: { x, y } }
-      })
-    )
-  }, [nodes, setNodes])
-
-
-  /** 置于顶层 */
-  const bringToFront = useCallback(() => {
-    const maxZ = Math.max(0, ...nodes.map(n => (n.style?.zIndex as number) || 0))
-    setNodes((nds) =>
-      nds.map((node) =>
-        node.selected
-          ? { ...node, style: { ...node.style, zIndex: maxZ + 1 } }
-          : node
-      )
-    )
-  }, [nodes, setNodes])
-
-  /** 置于底层 */
-  const sendToBack = useCallback(() => {
-    const minZ = Math.min(0, ...nodes.map(n => (n.style?.zIndex as number) ?? 0))
-    setNodes((nds) =>
-      nds.map((node) =>
-        node.selected
-          ? { ...node, style: { ...node.style, zIndex: minZ - 1 } }
-          : node
-      )
-    )
-  }, [nodes, setNodes])
-
-  /** 水平等间距分布（固定间距，以第一个选中为基准） */
-  const distributeHorizontalWithGap = useCallback((gap: number) => {
-    const selectedNodes = nodes.filter(n => n.selected).sort((a, b) => a.position.x - b.position.x)
-    if (selectedNodes.length < 2) return
-    const firstX = selectedNodes[0].position.x
-    setNodes((nds) =>
-      nds.map((node) => {
-        const idx = selectedNodes.findIndex(n => n.id === node.id)
-        if (idx === -1) return node
-        return { ...node, position: { ...node.position, x: firstX + idx * gap } }
-      })
-    )
-  }, [nodes, setNodes])
-
-  /** 垂直等间距分布（固定间距） */
-  const distributeVerticalWithGap = useCallback((gap: number) => {
-    const selectedNodes = nodes.filter(n => n.selected).sort((a, b) => a.position.y - b.position.y)
-    if (selectedNodes.length < 2) return
-    const firstY = selectedNodes[0].position.y
-    setNodes((nds) =>
-      nds.map((node) => {
-        const idx = selectedNodes.findIndex(n => n.id === node.id)
-        if (idx === -1) return node
-        return { ...node, position: { ...node.position, y: firstY + idx * gap } }
-      })
-    )
-  }, [nodes, setNodes])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1431,10 +1297,10 @@ export default function EditGridPage() {
 
   if (status === 'loading' || loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="min-h-screen flex items-center justify-center pg-surface">
         <div className="text-center">
           <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent"></div>
-          <p className="mt-4 text-gray-600">加载中...</p>
+          <p className="mt-4 pg-muted">加载中...</p>
         </div>
       </div>
     )
@@ -1443,14 +1309,14 @@ export default function EditGridPage() {
   const blockingCount = validation.filter((item) => item.severity === 'danger').length
 
   return (
-    <div className="h-screen flex flex-col bg-gray-50">
+    <div className="h-screen flex flex-col" style={{ background: tokens.bg }}>
       {/* 顶部工具栏 */}
-      <div className="bg-white border-b border-gray-200 px-6 py-4">
+      <div className="pg-panel border-b pg-border px-6 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <button
               onClick={() => router.push('/dashboard')}
-              className="flex items-center space-x-2 text-gray-600 hover:text-gray-900"
+              className="flex items-center space-x-2 pg-muted hover:pg-text"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -1462,7 +1328,7 @@ export default function EditGridPage() {
               type="text"
               value={gridName}
               onChange={(event) => setGridName(event.target.value)}
-              className="px-3 py-1.5 border border-gray-300 rounded-lg text-base font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none w-72"
+              className="px-3 py-1.5 border pg-border rounded-lg text-base font-semibold pg-text pg-panel focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none w-72"
               placeholder="请输入电网名称"
             />
             <span className="px-3 py-1 bg-blue-100 text-blue-700 text-sm font-medium rounded-full">
@@ -1474,19 +1340,19 @@ export default function EditGridPage() {
             <div className="flex items-center space-x-2">
               <button
                 onClick={handleCopy}
-                className="px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 transition"
+                className="px-3 py-2 text-sm rounded-lg border pg-border pg-text hover:bg-[var(--pg-surface)] transition"
               >
                 复制
               </button>
               <button
                 onClick={handleCut}
-                className="px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 transition"
+                className="px-3 py-2 text-sm rounded-lg border pg-border pg-text hover:bg-[var(--pg-surface)] transition"
               >
                 剪切
               </button>
               <button
                 onClick={handlePaste}
-                className="px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 transition"
+                className="px-3 py-2 text-sm rounded-lg border pg-border pg-text hover:bg-[var(--pg-surface)] transition"
               >
                 粘贴
               </button>
@@ -1499,7 +1365,7 @@ export default function EditGridPage() {
             </div>
             <button
               onClick={handleAutoLayout}
-              className="px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 transition"
+              className="px-3 py-2 text-sm rounded-lg border pg-border pg-text hover:bg-[var(--pg-surface)] transition"
             >
               一键整理
             </button>
@@ -1528,9 +1394,9 @@ export default function EditGridPage() {
 
       <div className="flex-1 flex overflow-hidden">
         {/* 左侧组件面板 */}
-        <div className="w-72 bg-white border-r border-gray-200 overflow-y-auto">
+        <div className="w-72 pg-panel border-r pg-border overflow-y-auto">
           <div className="p-4">
-            <h2 className="text-sm font-bold text-gray-800 mb-4 flex items-center">
+            <h2 className="text-sm font-bold pg-text mb-4 flex items-center">
               <svg className="w-5 h-5 mr-2 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
               </svg>
@@ -1539,7 +1405,7 @@ export default function EditGridPage() {
             
             {/* 电源部分 */}
             <div className="mb-6">
-              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">电源</h3>
+              <h3 className="text-xs font-semibold pg-muted uppercase tracking-wider mb-3">电源</h3>
               <ComponentButton
                 icon={
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1556,7 +1422,7 @@ export default function EditGridPage() {
 
             {/* 开关部分 */}
             <div className="mb-6">
-              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">控制元件</h3>
+              <h3 className="text-xs font-semibold pg-muted uppercase tracking-wider mb-3">控制元件</h3>
               <ComponentButton
                 icon={
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1617,7 +1483,7 @@ export default function EditGridPage() {
             
             {/* 负载部分 */}
             <div className="mb-6">
-              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">用电设备</h3>
+              <h3 className="text-xs font-semibold pg-muted uppercase tracking-wider mb-3">用电设备</h3>
               
               <ComponentButton
                 icon={renderLoadPaletteIcon('pump')}
@@ -1711,9 +1577,9 @@ export default function EditGridPage() {
             </div>
 
             {/* 操作提示 */}
-            <div className="mt-6 pt-6 border-t border-gray-200">
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">💡 操作提示</h3>
-              <div className="space-y-2 text-xs text-gray-600">
+            <div className="mt-6 pt-6 border-t pg-border">
+              <h3 className="text-sm font-semibold pg-text mb-3">💡 操作提示</h3>
+              <div className="space-y-2 text-xs pg-muted">
                 <div className="flex items-start space-x-2">
                   <div className="w-1.5 h-1.5 bg-blue-500 rounded-full mt-1.5"></div>
                   <p>点击元件添加到画布</p>
@@ -1742,21 +1608,21 @@ export default function EditGridPage() {
                 </p>
               </div>
 
-              <div className="mt-4 p-3 bg-white rounded-lg border border-gray-200">
+              <div className="mt-4 p-3 pg-panel rounded-lg border pg-border">
                 <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-xs font-semibold text-gray-700">规则校验</h3>
+                  <h3 className="text-xs font-semibold pg-text">规则校验</h3>
                   <div className="flex items-center space-x-2">
                     <button
                       type="button"
                       onClick={() => setShowUnpowered((prev) => !prev)}
-                      className="text-[10px] px-2 py-0.5 rounded-full border border-gray-300 text-gray-600 hover:bg-gray-50"
+                      className="text-[10px] px-2 py-0.5 rounded-full border pg-border pg-muted hover:bg-[var(--pg-surface)]"
                     >
                       {showUnpowered ? '隐藏未供电' : '显示未供电'}
                     </button>
                     <button
                       type="button"
                       onClick={() => setValidationCollapsed((prev) => !prev)}
-                      className="text-[10px] px-2 py-0.5 rounded-full border border-gray-300 text-gray-600 hover:bg-gray-50"
+                      className="text-[10px] px-2 py-0.5 rounded-full border pg-border pg-muted hover:bg-[var(--pg-surface)]"
                     >
                       {validationCollapsed ? '展开' : '折叠'}
                     </button>
@@ -1768,9 +1634,9 @@ export default function EditGridPage() {
                   </div>
                 </div>
                 {validationCollapsed ? (
-                  <div className="text-xs text-gray-500">已折叠</div>
+                  <div className="text-xs pg-muted">已折叠</div>
                 ) : validation.length === 0 ? (
-                  <div className="text-xs text-gray-500">未发现问题</div>
+                  <div className="text-xs pg-muted">未发现问题</div>
                 ) : (
                   <ul className="space-y-1 text-xs">
                     {validation.slice(0, 6).map((issue) => {
@@ -1835,7 +1701,7 @@ export default function EditGridPage() {
             defaultEdgeOptions={{
               type: 'smoothstep',
               animated: false,
-              style: { strokeWidth: 2, stroke: '#64748b' },
+              style: { strokeWidth: 2, stroke: tokens.edgeIdle },
               markerEnd: { type: MarkerType.ArrowClosed },
               data: {
                 controlOffsetX: 0,
@@ -1859,9 +1725,11 @@ export default function EditGridPage() {
             selectionOnDrag={true}
             // 启用框选
             selectionMode={SelectionMode.Partial}
-            className="bg-gray-50"
+            className="pg-canvas"
+            style={{ background: `radial-gradient(1100px 620px at 18% -8%, ${tokens.accentSoft} 0%, transparent 58%), ${tokens.bg}` }}
           >
-            <Background color="#e5e7eb" gap={16} />
+            <Background id="minor" color={tokens.grid} gap={20} size={1} />
+            <Background id="major" color={tokens.border} gap={100} size={2} />
             <Controls />
             <MiniMap
               nodeColor={(node) => {
@@ -1875,15 +1743,16 @@ export default function EditGridPage() {
                 }
                 return colors[node.type || ''] || '#94a3b8'
               }}
+              maskColor={mode === 'dark' ? 'rgba(11,18,32,0.55)' : 'rgba(241,245,249,0.55)'}
             />
           </ReactFlow>
         </div>
 
         {/* 右侧属性面板：选中单个节点时显示 */}
         {selectedNode && (
-          <div className="w-72 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0">
+          <div className="w-72 pg-panel border-l pg-border overflow-y-auto flex-shrink-0">
             <div className="p-4">
-              <h2 className="text-sm font-bold text-gray-800 mb-4 flex items-center justify-between">
+              <h2 className="text-sm font-bold pg-text mb-4 flex items-center justify-between">
                 <span className="flex items-center">
                   <svg className="w-5 h-5 mr-2 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -1891,18 +1760,18 @@ export default function EditGridPage() {
                   </svg>
                   属性
                 </span>
-                <span className="text-xs font-normal text-gray-500">{selectedNode.type}</span>
+                <span className="text-xs font-normal pg-muted">{selectedNode.type}</span>
               </h2>
 
               <div className="space-y-4">
                 {/* 标签 - 所有类型 */}
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1.5">标签</label>
+                  <label className="block text-xs font-medium pg-muted mb-1.5">标签</label>
                   <input
                     type="text"
                     value={selectedNode.data?.label ?? ''}
                     onChange={(e) => updateSelectedNodeData({ label: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                    className="w-full px-3 py-2 border pg-border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                     placeholder="显示名称"
                   />
                 </div>
@@ -1910,11 +1779,11 @@ export default function EditGridPage() {
                 {/* 断路器：状态 */}
                 {selectedNode.type === 'switch' && (
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1.5">状态</label>
+                    <label className="block text-xs font-medium pg-muted mb-1.5">状态</label>
                     <select
                       value={selectedNode.data?.status ?? 'off'}
                       onChange={(e) => updateSelectedNodeData({ status: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                      className="w-full px-3 py-2 border pg-border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                     >
                       <option value="off">断开</option>
                       <option value="on">闭合</option>
@@ -1924,14 +1793,14 @@ export default function EditGridPage() {
 
                 {selectedNode.type === 'switch' && (
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1.5">额定电流 (A)</label>
+                    <label className="block text-xs font-medium pg-muted mb-1.5">额定电流 (A)</label>
                     <input
                       type="number"
                       min={1}
                       max={5000}
                       value={selectedNode.data?.ratedCurrent ?? 630}
                       onChange={(e) => updateSelectedNodeData({ ratedCurrent: toNumberInput(e.target.value, 630) })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                      className="w-full px-3 py-2 border pg-border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                     />
                   </div>
                 )}
@@ -1940,29 +1809,29 @@ export default function EditGridPage() {
                 {selectedNode.type === 'load' && (
                   <>
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1.5">状态</label>
+                      <label className="block text-xs font-medium pg-muted mb-1.5">状态</label>
                       <select
                         value={selectedNode.data?.status ?? 'stopped'}
                         onChange={(e) => updateSelectedNodeData({ status: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                        className="w-full px-3 py-2 border pg-border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                       >
                         <option value="stopped">停止</option>
                         <option value="running">运行</option>
                       </select>
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1.5">功率 (kW)</label>
+                      <label className="block text-xs font-medium pg-muted mb-1.5">功率 (kW)</label>
                       <input
                         type="number"
                         min={1}
                         max={500}
                         value={selectedNode.data?.power ?? 50}
                         onChange={(e) => updateSelectedNodeData({ power: toNumberInput(e.target.value, 50) })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                        className="w-full px-3 py-2 border pg-border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1.5">设备类型</label>
+                      <label className="block text-xs font-medium pg-muted mb-1.5">设备类型</label>
                       <select
                         value={selectedNode.data?.subType ?? 'pump'}
                         onChange={(e) => {
@@ -1997,7 +1866,7 @@ export default function EditGridPage() {
                             power: powers[subType] ?? 50,
                           })
                         }}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                        className="w-full px-3 py-2 border pg-border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                       >
                         <option value="pump">水泵</option>
                         <option value="fan">风机</option>
@@ -2017,14 +1886,14 @@ export default function EditGridPage() {
                 {/* 电源：电压 */}
                 {selectedNode.type === 'powerSource' && (
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1.5">电压 (V)</label>
+                    <label className="block text-xs font-medium pg-muted mb-1.5">电压 (V)</label>
                     <input
                       type="number"
                       min={1}
                       max={1000}
                       value={selectedNode.data?.voltage ?? 380}
                       onChange={(e) => updateSelectedNodeData({ voltage: toNumberInput(e.target.value, 380) })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                      className="w-full px-3 py-2 border pg-border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                     />
                   </div>
                 )}
@@ -2032,85 +1901,85 @@ export default function EditGridPage() {
                 {selectedNode.type === 'transformer' && (
                   <>
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1.5">变压器电压 (V)</label>
+                      <label className="block text-xs font-medium pg-muted mb-1.5">变压器电压 (V)</label>
                       <input
                         type="number"
                         min={1}
                         max={100000}
                         value={selectedNode.data?.voltage ?? 380}
                         onChange={(e) => updateSelectedNodeData({ voltage: toNumberInput(e.target.value, 380) })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                        className="w-full px-3 py-2 border pg-border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1.5">变比</label>
+                      <label className="block text-xs font-medium pg-muted mb-1.5">变比</label>
                       <input
                         type="number"
                         min={0.01}
                         step={0.01}
                         value={selectedNode.data?.ratio ?? 1}
                         onChange={(e) => updateSelectedNodeData({ ratio: toNumberInput(e.target.value, 1) })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                        className="w-full px-3 py-2 border pg-border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1.5">容量 (kVA)</label>
+                      <label className="block text-xs font-medium pg-muted mb-1.5">容量 (kVA)</label>
                       <input
                         type="number"
                         min={1}
                         max={100000}
                         value={selectedNode.data?.capacity ?? 1000}
                         onChange={(e) => updateSelectedNodeData({ capacity: toNumberInput(e.target.value, 1000) })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                        className="w-full px-3 py-2 border pg-border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                       />
                     </div>
                   </>
                 )}
               </div>
 
-              <p className="mt-4 text-xs text-gray-400">点击画布空白处取消选择</p>
+              <p className="mt-4 text-xs pg-muted">点击画布空白处取消选择</p>
             </div>
           </div>
         )}
 
         {/* 右侧连线面板：选中单条连线时显示 */}
         {!selectedNode && selectedEdge && (
-          <div className="w-72 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0">
+          <div className="w-72 pg-panel border-l pg-border overflow-y-auto flex-shrink-0">
             <div className="p-4">
-              <h2 className="text-sm font-bold text-gray-800 mb-4">连线设置</h2>
+              <h2 className="text-sm font-bold pg-text mb-4">连线设置</h2>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1.5">段落调节说明</label>
-                  <div className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 bg-gray-50">
+                  <label className="block text-xs font-medium pg-muted mb-1.5">段落调节说明</label>
+                  <div className="w-full px-3 py-2 border pg-border rounded-lg text-sm pg-text pg-surface">
                     直接拖线段：垂直段左右移、水平段上下移（连接点前后 20px 固定）
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1.5">X偏移</label>
+                    <label className="block text-xs font-medium pg-muted mb-1.5">X偏移</label>
                     <input
                       type="number"
                       value={Math.round(selectedEdgeData.controlOffsetX ?? 0)}
                       onChange={(event) =>
                         updateSelectedEdgeData({ controlOffsetX: toNumberInput(event.target.value, 0) })
                       }
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                      className="w-full px-3 py-2 border pg-border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1.5">上横Y偏移</label>
+                    <label className="block text-xs font-medium pg-muted mb-1.5">上横Y偏移</label>
                     <input
                       type="number"
                       value={Math.round(selectedEdgeData.sourceOffsetY ?? selectedEdgeData.controlOffsetY ?? 0)}
                       onChange={(event) =>
                         updateSelectedEdgeData({ sourceOffsetY: toNumberInput(event.target.value, 0) })
                       }
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                      className="w-full px-3 py-2 border pg-border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                     />
                   </div>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1.5">电压等级 (V)</label>
+                  <label className="block text-xs font-medium pg-muted mb-1.5">电压等级 (V)</label>
                   <input
                     type="number"
                     min={1}
@@ -2119,44 +1988,44 @@ export default function EditGridPage() {
                     onChange={(event) =>
                       updateSelectedEdgeData({ voltage: toNumberInput(event.target.value, 380) })
                     }
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                    className="w-full px-3 py-2 border pg-border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1.5">下横Y偏移</label>
+                  <label className="block text-xs font-medium pg-muted mb-1.5">下横Y偏移</label>
                   <input
                     type="number"
                     value={Math.round(selectedEdgeData.targetOffsetY ?? selectedEdgeData.controlOffsetY ?? 0)}
                     onChange={(event) =>
                       updateSelectedEdgeData({ targetOffsetY: toNumberInput(event.target.value, 0) })
                     }
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                    className="w-full px-3 py-2 border pg-border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1.5">快速移动（10px）</label>
+                  <label className="block text-xs font-medium pg-muted mb-1.5">快速移动（10px）</label>
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       onClick={() => moveSelectedEdgeControlPoint(-10, 0)}
-                      className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+                      className="px-3 py-2 text-sm border pg-border rounded-lg hover:bg-[var(--pg-surface)] transition"
                     >
                       左移
                     </button>
                     <button
                       onClick={() => moveSelectedEdgeControlPoint(10, 0)}
-                      className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+                      className="px-3 py-2 text-sm border pg-border rounded-lg hover:bg-[var(--pg-surface)] transition"
                     >
                       右移
                     </button>
                     <button
                       onClick={() => moveSelectedEdgeControlPoint(0, -10)}
-                      className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+                      className="px-3 py-2 text-sm border pg-border rounded-lg hover:bg-[var(--pg-surface)] transition"
                     >
                       上移
                     </button>
                     <button
                       onClick={() => moveSelectedEdgeControlPoint(0, 10)}
-                      className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+                      className="px-3 py-2 text-sm border pg-border rounded-lg hover:bg-[var(--pg-surface)] transition"
                     >
                       下移
                     </button>
@@ -2164,11 +2033,11 @@ export default function EditGridPage() {
                 </div>
                 <button
                   onClick={resetSelectedEdgeControlPoint}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+                  className="w-full px-3 py-2 text-sm border pg-border rounded-lg hover:bg-[var(--pg-surface)] transition"
                 >
                   重置编辑点
                 </button>
-                <p className="text-xs text-gray-500">箭头方向跟随末端固定段，保持稳定不乱跳。</p>
+                <p className="text-xs pg-muted">箭头方向跟随末端固定段，保持稳定不乱跳。</p>
               </div>
             </div>
           </div>
@@ -2185,7 +2054,7 @@ export default function EditGridPage() {
 
       {contextMenu.open && (
         <div
-          className="fixed z-[200] min-w-[160px] rounded-lg border border-gray-200 bg-white shadow-lg overflow-hidden"
+          className="fixed z-[200] min-w-[160px] rounded-lg border pg-border pg-panel shadow-lg overflow-hidden"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onContextMenu={(event) => event.preventDefault()}
         >
@@ -2193,24 +2062,24 @@ export default function EditGridPage() {
             <>
               <button
                 onClick={() => { handleCopy(); setContextMenu((prev) => ({ ...prev, open: false })) }}
-                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                className="w-full text-left px-4 py-2 text-sm pg-text hover:bg-[var(--pg-surface)]"
               >复制</button>
               <button
                 onClick={() => { handleCut(); setContextMenu((prev) => ({ ...prev, open: false })) }}
-                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                className="w-full text-left px-4 py-2 text-sm pg-text hover:bg-[var(--pg-surface)]"
               >剪切</button>
             </>
           )}
           {hasClipboard && (
             <button
               onClick={() => { handlePaste(); setContextMenu((prev) => ({ ...prev, open: false })) }}
-              className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              className="w-full text-left px-4 py-2 text-sm pg-text hover:bg-[var(--pg-surface)]"
             >粘贴</button>
           )}
           {contextMenu.type !== 'pane' && (nodes.some((node) => node.selected) || edges.some((edge) => edge.selected)) && (
             <button
               onClick={() => { deleteSelectedElements(); setContextMenu((prev) => ({ ...prev, open: false })) }}
-              className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              className="w-full text-left px-4 py-2 text-sm pg-text hover:bg-[var(--pg-surface)]"
             >删除</button>
           )}
         </div>
@@ -2222,15 +2091,15 @@ export default function EditGridPage() {
             className="absolute inset-0 bg-black/40"
             onClick={closePreview}
           />
-          <div className="absolute right-0 top-0 h-full w-[80vw] min-w-[420px] bg-white shadow-2xl flex flex-col">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
-              <div className="text-sm font-semibold text-gray-800">模拟预览</div>
+          <div className="absolute right-0 top-0 h-full w-[80vw] min-w-[420px] pg-panel shadow-2xl flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3 border-b pg-border">
+              <div className="text-sm font-semibold pg-text">模拟预览</div>
               <button
                 onClick={closePreview}
-                className="p-2 rounded-lg hover:bg-gray-100 transition"
+                className="p-2 rounded-lg hover:bg-[var(--pg-surface)] transition"
                 aria-label="关闭预览"
               >
-                <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-4 h-4 pg-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
@@ -2262,22 +2131,13 @@ function ComponentButton({
   onClick: () => void
   onDragStart?: (event: React.DragEvent) => void
 }) {
+  // 皮肤化：底色/描边走面板变量，颜色只留在图标与悬停描边上
   const colorClasses: Record<string, string> = {
-    blue: 'bg-blue-50 hover:bg-blue-100 border-blue-200 hover:border-blue-400 text-blue-600',
-    green: 'bg-green-50 hover:bg-green-100 border-green-200 hover:border-green-400 text-green-600',
-    emerald: 'bg-emerald-50 hover:bg-emerald-100 border-emerald-200 hover:border-emerald-400 text-emerald-600',
-    indigo: 'bg-indigo-50 hover:bg-indigo-100 border-indigo-200 hover:border-indigo-400 text-indigo-600',
-    cyan: 'bg-cyan-50 hover:bg-cyan-100 border-cyan-200 hover:border-cyan-400 text-cyan-600',
-    sky: 'bg-sky-50 hover:bg-sky-100 border-sky-200 hover:border-sky-400 text-sky-600',
-    purple: 'bg-purple-50 hover:bg-purple-100 border-purple-200 hover:border-purple-400 text-purple-600',
-    pink: 'bg-pink-50 hover:bg-pink-100 border-pink-200 hover:border-pink-400 text-pink-600',
-    amber: 'bg-amber-50 hover:bg-amber-100 border-amber-200 hover:border-amber-400 text-amber-600',
-    red: 'bg-red-50 hover:bg-red-100 border-red-200 hover:border-red-400 text-red-600',
-    orange: 'bg-orange-50 hover:bg-orange-100 border-orange-200 hover:border-orange-400 text-orange-600',
-    rose: 'bg-rose-50 hover:bg-rose-100 border-rose-200 hover:border-rose-400 text-rose-600',
-    yellow: 'bg-yellow-50 hover:bg-yellow-100 border-yellow-200 hover:border-yellow-400 text-yellow-600',
-    teal: 'bg-teal-50 hover:bg-teal-100 border-teal-200 hover:border-teal-400 text-teal-600',
-    gray: 'bg-gray-50 hover:bg-gray-100 border-gray-200 hover:border-gray-400 text-gray-600',
+    blue: 'text-blue-600', green: 'text-green-600', emerald: 'text-emerald-600',
+    indigo: 'text-indigo-600', cyan: 'text-cyan-600', sky: 'text-sky-600',
+    purple: 'text-purple-600', pink: 'text-pink-600', amber: 'text-amber-600',
+    red: 'text-red-600', orange: 'text-orange-600', rose: 'text-rose-600',
+    yellow: 'text-yellow-600', teal: 'text-teal-600', gray: 'pg-muted',
   }
   
   return (
@@ -2285,18 +2145,18 @@ function ComponentButton({
       onClick={onClick}
       draggable
       onDragStart={onDragStart}
-      className={`w-full text-left px-3 py-2.5 mb-2 rounded-lg border transition-all group ${colorClasses[color]}`}
+      className={`pg-chip w-full text-left px-3 py-2.5 mb-2 transition-all group ${colorClasses[color]}`}
     >
       <div className="flex items-start space-x-3">
         <div className="mt-0.5">
           {icon}
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-semibold text-gray-900 truncate">
+          <div className="text-sm font-semibold pg-text truncate">
             {label}
           </div>
           {description && (
-            <div className="text-xs text-gray-500 mt-0.5">
+            <div className="text-xs pg-muted mt-0.5">
               {description}
             </div>
           )}

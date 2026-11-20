@@ -109,7 +109,7 @@ const SKIN_STYLE: Record<
     fontFamily: "Inter, 'Noto Sans SC', system-ui, -apple-system, sans-serif",
     panel: {
       light: { panel: '#ffffff', panelBorder: '#e2e8f0', panelMuted: '#f8fafc' },
-      dark: { panel: '#162236', panelBorder: '#2f4059', panelMuted: '#0f1a2b' },
+      dark: { panel: '#1b2740', panelBorder: '#3a4d6b', panelMuted: '#121d2e' },
     },
   },
   schematic: {
@@ -117,7 +117,7 @@ const SKIN_STYLE: Record<
     fontFamily: "'JetBrains Mono', 'Sarasa Mono SC', ui-monospace, SFMono-Regular, monospace",
     panel: {
       light: { panel: '#fdfefd', panelBorder: '#cfe0cf', panelMuted: '#f2f7f2' },
-      dark: { panel: '#141c15', panelBorder: '#334436', panelMuted: '#101711' },
+      dark: { panel: '#1a241c', panelBorder: '#405240', panelMuted: '#121a13' },
     },
   },
   paper: {
@@ -125,7 +125,7 @@ const SKIN_STYLE: Record<
     fontFamily: "Georgia, 'Songti SC', 'Noto Serif SC', serif",
     panel: {
       light: { panel: '#fffdf7', panelBorder: '#e2d9c3', panelMuted: '#f6f0e2' },
-      dark: { panel: '#2a2420', panelBorder: '#463f37', panelMuted: '#221e1a' },
+      dark: { panel: '#312922', panelBorder: '#52483c', panelMuted: '#221e1a' },
     },
   },
 }

@@ -60,12 +60,17 @@ export function evaluateChecks(nodes: NodeModel[], edges: EdgeModel[], result: G
     }
   })
 
+  const nodeName = (id: string) => nodes.find((node) => node.id === id)?.data.label ?? '母线'
   result.sections.forEach((section) => {
     if (!section.energized) {
+      const busNames = section.busIds.map(nodeName)
+      const label = busNames.length > 0 ? busNames.join('、') : '母线段'
+      const detail =
+        section.loadCount > 0 ? `${section.loadCount} 台设备停运` : '该段无负荷，母线带电状态未知'
       checks.push({
         code: 'SECTION_DEENERGIZED',
         severity: 'warning',
-        message: `第 ${section.busIds.length} 母线所在分段失电（${section.loadCount} 台设备停运）`,
+        message: `${label} 所在分段失电（${detail}）`,
         nodeIds: section.busIds,
         edgeIds: [],
       })

@@ -1,5 +1,29 @@
 # 更新日志
 
+## v2.9.1 - 实机验收后的画布与预览修复
+
+对着真实浏览器截图改观感，把"黑画布"和"预览报错"两个现场问题修掉，顺手清了编辑页里的死代码。
+
+### 画布（黑色画布根因）
+- `app/globals.css`：`.react-flow__background` 强制 `background-color: transparent !important`。XYFlow 13 这一层会按 `prefers-color-scheme: dark` 自行铺 `rgb(20,20,20)`，压住节点与网格；保留透明让画布底色由 `<ReactFlow style>` 决定
+- 画布改为"径向渐变 + 双层网格"：`radial-gradient(1100px 620px at 18% -8%, accentSoft, bg)` 给左上角一点光晕，`<Background id="minor" gap=20 size=1>` 细点 + `<Background id="major" gap=100 size=2>` 粗点定分区，不再是整片纯色
+- 小地图改为中性色（结构用 panelBorder、母线用 muted、选中用 accent），不再五颜六色；遮罩色跟随明暗
+- 深色皮肤卡片提亮：industrial `panel #1b2740 / panelBorder #3a4d6b`，schematic `#1a241c / #405240`，paper `#312922 / #52483c`
+
+### 预览（模拟预览抽屉）
+- 母线不再是"单输入"元件：`onConnect` 独占校验只对非母线、非母联生效，两路电源并联进同一段母线不再弹"该节点输入端口已连接一条线路"
+- 抽屉内关闭按钮、日志条目、操作指南等 `bg-gray-50/100`、彩色渐变卡片全部换成 `pg-panel / pg-surface`，深浅色都跟皮肤走
+- 系统状态四张卡从彩色渐变底改为面板底，颜色只留在图标上
+
+### 校验文案
+- `SECTION_DEENERGIZED` 原来把 `busIds.length` 当段号，出现"第 1 母线"的误导；改为按母线名称输出，无负荷时明确写"该段无负荷，母线带电状态未知"
+
+### 清理
+- 删除编辑页从未接入 UI 的对齐/分布工具（`alignNodes`、`distributeNodes`、`snapNodesToGrid`、`bringToFront`、`sendToBack`、两版 `distribute*WithGap`）与 `summarizeLint` 引用、`LoadNode` 的 `getLoadColor`；`onConnect` 补 `tokens.edgeIdle` 依赖
+
+### 验证
+- `tsc --noEmit` 0 错误、`eslint .` 0 warning、`vitest` 65/65、`next build` 通过
+
 ## v2.9.0 - 告警去抖、会话回放、拓扑模板与数据迁移
 
 这一版把"能看"补成"能复盘、能开箱建图"，并把皮肤下沉到面板与元件本体。
