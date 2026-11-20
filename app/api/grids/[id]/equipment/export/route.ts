@@ -2,12 +2,14 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions, requireRole } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { getScopedGrid } from '@/lib/tenant'
 
 /** 导出该电网的设备清单（保存时已自动同步，与电网一致） */
 export async function GET(
   request: Request,
-  { params }: { params: { id: string } }
+  { params: paramsPromise }: { params: Promise<{ id: string }> }
 ) {
+  const params = await paramsPromise
   try {
     const session = await getServerSession(authOptions)
     const denied = requireRole(session, ['ENGINEER', 'OPERATOR'])
@@ -15,6 +17,11 @@ export async function GET(
 
     const { searchParams } = new URL(request.url)
     const format = searchParams.get('format') || 'json'
+
+    const scopedGrid = await getScopedGrid(session, params.id)
+    if (!scopedGrid) {
+      return NextResponse.json({ error: 'Grid not found' }, { status: 404 })
+    }
 
     const grid = await prisma.powerGrid.findUnique({
       where: { id: params.id },
@@ -52,7 +59,14 @@ export async function GET(
       const csvContent = [
         headers.join(','),
         ...rows.map((row) =>
-          row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')
+          row
+            .map((cell) => {
+              const text = String(cell)
+              // 防止 Excel/WPS 把单元格当作公式执行
+              const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text
+              return `"${safe.replace(/"/g, '""')}"`
+            })
+            .join(',')
         ),
       ].join('\n')
       const bom = '\uFEFF'

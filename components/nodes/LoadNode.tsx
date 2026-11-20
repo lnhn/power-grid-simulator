@@ -1,7 +1,8 @@
 import { memo } from 'react'
-import { Handle, Position, NodeProps } from 'reactflow'
+import { Handle, Position, type NodeProps } from '@xyflow/react'
+import type { GridNode } from '@/lib/grid'
 
-export const LoadNode = memo(({ data, selected }: NodeProps) => {
+export const LoadNode = memo(({ data, selected }: NodeProps<GridNode>) => {
   const getLoadIcon = () => {
     const iconClass = 'w-5 h-5 text-white'
     const common = {

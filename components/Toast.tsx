@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 
 export type ToastType = 'success' | 'error' | 'info'
 
@@ -12,10 +12,17 @@ export interface ToastProps {
 }
 
 export function Toast({ message, type = 'info', onClose, duration = 3000 }: ToastProps) {
+  // 用 ref 保存最新的 onClose，避免父组件渲染产生新的内联回调时重置计时器
+  const onCloseRef = useRef(onClose)
+
   useEffect(() => {
-    const timer = setTimeout(onClose, duration)
+    onCloseRef.current = onClose
+  }, [onClose])
+
+  useEffect(() => {
+    const timer = setTimeout(() => onCloseRef.current(), duration)
     return () => clearTimeout(timer)
-  }, [onClose, duration])
+  }, [duration])
 
   const styles = {
     success: 'bg-emerald-600 text-white border-emerald-700 shadow-emerald-200',

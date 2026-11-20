@@ -3,11 +3,21 @@ import { getServerSession } from 'next-auth'
 import { authOptions, requireRole } from '@/lib/auth'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
+import { getScopedGrid } from '@/lib/tenant'
+
+function isValidJsonArray(value: string): boolean {
+  try {
+    return Array.isArray(JSON.parse(value))
+  } catch {
+    return false
+  }
+}
 
 export async function GET(
   request: Request,
-  { params }: { params: { id: string } }
+  { params: paramsPromise }: { params: Promise<{ id: string }> }
 ) {
+  const params = await paramsPromise
   try {
     const session = await getServerSession(authOptions)
     
@@ -15,30 +25,44 @@ export async function GET(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const grid = await prisma.powerGrid.findUnique({
-      where: { id: params.id },
-    })
+    const grid = await getScopedGrid(session, params.id)
 
     if (!grid) {
       return NextResponse.json({ error: 'Grid not found' }, { status: 404 })
     }
 
     return NextResponse.json(grid)
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Failed to fetch grid' }, { status: 500 })
   }
 }
 
 export async function PUT(
   request: Request,
-  { params }: { params: { id: string } }
+  { params: paramsPromise }: { params: Promise<{ id: string }> }
 ) {
+  const params = await paramsPromise
   try {
     const session = await getServerSession(authOptions)
     const denied = requireRole(session, ['ENGINEER'])
     if (denied) return denied
 
+    const existing = await getScopedGrid(session, params.id)
+    if (!existing) {
+      return NextResponse.json({ error: 'Grid not found' }, { status: 404 })
+    }
+
     const { nodes, edges, name, description } = await request.json()
+
+    if (nodes !== undefined && (typeof nodes !== 'string' || !isValidJsonArray(nodes))) {
+      return NextResponse.json({ error: 'nodes 必须是合法的 JSON 数组字符串' }, { status: 400 })
+    }
+    if (edges !== undefined && (typeof edges !== 'string' || !isValidJsonArray(edges))) {
+      return NextResponse.json({ error: 'edges 必须是合法的 JSON 数组字符串' }, { status: 400 })
+    }
+    if (description !== undefined && description !== null && typeof description !== 'string') {
+      return NextResponse.json({ error: '电网描述格式不正确' }, { status: 400 })
+    }
 
     const updateData: Record<string, unknown> = {}
     if (nodes !== undefined) updateData.nodes = nodes
@@ -93,12 +117,18 @@ export async function PUT(
 
 export async function DELETE(
   request: Request,
-  { params }: { params: { id: string } }
+  { params: paramsPromise }: { params: Promise<{ id: string }> }
 ) {
+  const params = await paramsPromise
   try {
     const session = await getServerSession(authOptions)
     const denied = requireRole(session, ['ENGINEER'])
     if (denied) return denied
+
+    const existing = await getScopedGrid(session, params.id)
+    if (!existing) {
+      return NextResponse.json({ error: 'Grid not found' }, { status: 404 })
+    }
 
     await prisma.$transaction([
       prisma.operationLog.deleteMany({
@@ -110,7 +140,7 @@ export async function DELETE(
     ])
 
     return NextResponse.json({ success: true })
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Failed to delete grid' }, { status: 500 })
   }
 }

@@ -28,7 +28,7 @@ export default function LoginPage() {
       } else {
         router.push('/dashboard')
       }
-    } catch (error) {
+    } catch {
       setError('登录失败，请重试')
     } finally {
       setLoading(false)
@@ -96,13 +96,6 @@ export default function LoginPage() {
               {loading ? '登录中...' : '登录'}
             </button>
           </form>
-
-          {/* 测试账号提示 */}
-          <div className="mt-6 pt-6 border-t border-gray-200">
-            <p className="text-xs text-gray-500 text-center">
-              测试账号: engineer / operator (密码: password)
-            </p>
-          </div>
         </div>
       </div>
     </div>

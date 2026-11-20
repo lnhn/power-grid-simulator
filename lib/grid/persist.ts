@@ -10,6 +10,8 @@ const RUNTIME_KEYS = [
   'tieMode',
   'flow',
   'loop',
+  'loadKw',
+  'sourceKw',
 ]
 
 function stripData(data: Record<string, unknown> | undefined) {

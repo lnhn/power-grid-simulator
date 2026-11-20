@@ -1,4 +1,18 @@
-import type { Edge, Node } from 'reactflow'
+import type { Edge, Node } from '@xyflow/react'
+
+/**
+ * 画布节点 data 的宽松契约：data 来自持久化 JSON 与运行时叠加，字段是动态且跨页共用的，
+ * 因此在类型层只约束「可索引对象」，具体字段由使用方按需判型。
+ * （XYFlow 13 要求 data 可赋值给 Record<string, unknown>）
+ */
+export interface GridNodeData extends Record<string, unknown> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [key: string]: any
+}
+
+/** 画布节点/边类型：供 useNodesState、NodeProps 与构建函数统一使用 */
+export type GridNode = Node<GridNodeData>
+export type GridEdge = Edge
 import { EdgeModel } from './models/EdgeModel'
 import { NodeModel, NodeType } from './models/NodeModel'
 import { Side } from './models/PortModel'

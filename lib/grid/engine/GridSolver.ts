@@ -73,7 +73,7 @@ export type GridSolveResult = {
   nodeSection: Map<string, string>
   /** 每个负荷当前用电功率（kW） */
   loadKw: Map<string, number>
-  /** 每个电源当前出力（kW，同段内平均分摊） */
+  /** 每个电源当前出力（kW，按负荷沿供电树首次到达的电源回推累加） */
   sourceOutput: Map<string, number>
   /** 全网在用负荷合计（kW） */
   totalKw: number
@@ -93,7 +93,8 @@ export class GridSolver {
   static solve(nodes: NodeModel[], edges: EdgeModel[]): GridSolveResult {
     const uf = buildElectricalUnion(nodes, edges)
     const potentials = computePotentials(uf, nodes)
-    const portEnergized = (portId: string) => potentials.voltages.has(uf.find(portId))
+    // 不变量：带电 == 电位 > 0（与 computePower 的负荷判定同口径），0V 不算带电
+    const portEnergized = (portId: string) => (potentials.voltages.get(uf.find(portId)) ?? 0) > 0
     const portVoltage = (portId: string) => potentials.voltages.get(uf.find(portId)) ?? 0
 
     // BFS：判断"从电源出发的供电层级"（流向）与环网交叉边，不参与带电判定
@@ -220,7 +221,7 @@ export class GridSolver {
             sourceIds: [],
             loadIds: [],
             voltage: potentials.voltages.get(root) ?? 0,
-            energized: potentials.voltages.has(root),
+            energized: (potentials.voltages.get(root) ?? 0) > 0,
             loadKw: 0,
             loadCount: 0,
             currentA: 0,
@@ -230,12 +231,11 @@ export class GridSolver {
         section.busIds.push(bus.id)
       })
 
-    nodes
-      .filter((node) => node.type === 'powerSource' && node.data.inService !== false)
-      .forEach((source) => {
-        const section = sectionMap.get(uf.find(`${source.id}:bottom`))
-        if (section && !section.sourceIds.includes(source.id)) section.sourceIds.push(source.id)
-      })
+    // 不变量：段的供电电源直接取 computePotentials 沿变压器逐级传播后的结果，
+    // 因此变压器二次侧母线也能列出经变压器送来的电源，而不是只认同并查集根的直接接入电源。
+    sectionMap.forEach((section, root) => {
+      section.sourceIds = Array.from(potentials.sourceIds.get(root) ?? [])
+    })
 
     nodes
       .filter((node) => node.type === 'load')
@@ -256,13 +256,15 @@ export class GridSolver {
       else if (sectionMap.has(rootBottom)) nodeSection.set(node.id, rootBottom)
     })
 
+    // 功率口径统一：sourceOutput 直接取 computePower 沿生成树回推的结果（与 edgeKw 同一条父边路径），
+    // 同一电源供多段时自然累加；因此 sum(sourceOutput) === sum(loadKw) === totalKw 恒成立。
+    const sourceOutput = power.sourceKw
     let totalKw = 0
-    const sourceOutput = new Map<string, number>()
+    sourceOutput.forEach((kw) => {
+      totalKw += kw
+    })
     sectionMap.forEach((section) => {
-      totalKw += section.loadKw
       section.currentA = powerToCurrent(section.loadKw, section.voltage)
-      const share = section.sourceIds.length > 0 ? section.loadKw / section.sourceIds.length : 0
-      section.sourceIds.forEach((sourceId) => sourceOutput.set(sourceId, share))
     })
 
     const ties = new Map<string, TieState>()

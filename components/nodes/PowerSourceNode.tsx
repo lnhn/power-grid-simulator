@@ -1,7 +1,8 @@
 import { memo } from 'react'
-import { Handle, Position, NodeProps } from 'reactflow'
+import { Handle, Position, type NodeProps } from '@xyflow/react'
+import type { GridNode } from '@/lib/grid'
 
-export const PowerSourceNode = memo(({ data, selected }: NodeProps) => {
+export const PowerSourceNode = memo(({ data, selected }: NodeProps<GridNode>) => {
   return (
     <div className="relative bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg shadow-lg px-6 py-3 min-w-[240px] border-2 border-blue-400">
       {selected && (

@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useSession } from 'next-auth/react'
-import { useRouter } from 'next/navigation'
-import ReactFlow, {
+import { useParams, useRouter } from 'next/navigation'
+import {
+  ReactFlow,
   Background,
   Controls,
   MiniMap,
@@ -11,8 +12,8 @@ import ReactFlow, {
   useEdgesState,
   Node,
   Edge,
-} from 'reactflow'
-import 'reactflow/dist/style.css'
+} from '@xyflow/react'
+import '@xyflow/react/dist/style.css'
 import { SimulatePowerSourceNode } from '@/components/nodes/SimulatePowerSourceNode'
 import { SimulateSwitchNode } from '@/components/nodes/SimulateSwitchNode'
 import { SimulateLoadNode } from '@/components/nodes/SimulateLoadNode'
@@ -21,9 +22,10 @@ import { SimulateTransformerNode } from '@/components/nodes/SimulateTransformerN
 import { Toast } from '@/components/Toast'
 import { ConfirmModal } from '@/components/ConfirmModal'
 import { buildGridModels, GridSolver, voltageToColor, inferTieHandle, normalizeTieHandle, buildNodeRuntime } from '@/lib/grid'
-import type { SectionState, TieState } from '@/lib/grid'
+import type { SectionState, TieState, GridNode, GridEdge } from '@/lib/grid'
 import { evaluateChecks, previewTieToggle } from '@/lib/grid'
 import type { GridCheck } from '@/lib/grid'
+import { useSkin } from '@/components/SkinProvider'
 
 const nodeTypes = {
   powerSource: SimulatePowerSourceNode,
@@ -31,6 +33,15 @@ const nodeTypes = {
   load: SimulateLoadNode,
   bus: SimulateBusNode,
   transformer: SimulateTransformerNode,
+}
+
+// 编辑页“模拟预览”写入的草稿键，草稿模式下操作不落库
+const PREVIEW_DRAFT_KEY = 'pg-preview-draft'
+
+/** 读取 URL 上的 draft=1 标记；不依赖 useSearchParams，避免静态渲染的 Suspense 要求 */
+const isDraftPreview = () => {
+  if (typeof window === 'undefined') return false
+  return new URLSearchParams(window.location.search).get('draft') === '1'
 }
 
 interface GridData {
@@ -53,16 +64,20 @@ interface OperationLog {
   details?: string
 }
 
-export default function SimulateGridPage({ params }: { params: { id: string } }) {
-  const { data: session, status } = useSession()
+export default function SimulateGridPage() {
+  // Next 16 中页面 params 为 Promise，客户端组件统一通过 useParams 读取
+  const { id: gridId } = useParams<{ id: string }>()
+  const { status } = useSession()
+  const { tokens } = useSkin()
   const router = useRouter()
-  const [nodes, setNodes, onNodesChange] = useNodesState([])
-  const [edges, setEdges, onEdgesChange] = useEdgesState([])
+  const [nodes, setNodes, onNodesChange] = useNodesState<GridNode>([])
+  const [edges, setEdges, onEdgesChange] = useEdgesState<GridEdge>([])
   const [grid, setGrid] = useState<GridData | null>(null)
   const [loading, setLoading] = useState(true)
   const [logs, setLogs] = useState<OperationLog[]>([])
   const [showLogs, setShowLogs] = useState(false)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
+  const [draftMode, setDraftMode] = useState(false)
   const [confirmModal, setConfirmModal] = useState<{
     open: boolean
     title: string
@@ -72,8 +87,14 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
   const [summary, setSummary] = useState<{ sections: SectionState[]; ties: TieState[]; totalKw: number; checks: GridCheck[] } | null>(null)
   const nodesRef = useRef<Node[]>([])
   const edgesRef = useRef<Edge[]>([])
-  nodesRef.current = nodes
-  edgesRef.current = edges
+
+  // 同步最新画布到 ref，供事件回调读取；在 effect 中写入避免渲染期变更 ref
+  useEffect(() => {
+    nodesRef.current = nodes
+  }, [nodes])
+  useEffect(() => {
+    edgesRef.current = edges
+  }, [edges])
 
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -81,12 +102,19 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
     }
   }, [status, router])
 
+  // 草稿预览标记（iframe 地址带 ?draft=1），仅用于展示提示；写操作另用 isDraftPreview() 实时判断
+  useEffect(() => {
+    setDraftMode(isDraftPreview())
+  }, [])
+
   // 仅当电网 id 变化时拉取电网数据，避免打开操作日志时 showLogs 变化导致重新 fetchGrid 覆盖当前模拟状态
   // 会话就绪后才请求，未登录时不发起必然 401 的请求
   useEffect(() => {
     if (status === 'loading' || status === 'unauthenticated') return
     fetchGrid()
-  }, [params.id, status])
+    // 只在电网 id / 会话状态变化时加载，避免 showLogs 变化覆盖模拟中的本地状态
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gridId, status])
 
   // 日志：初次打开时拉取一次，打开状态下每 5 秒刷新（不依赖 showLogs 触发 fetchGrid）
   useEffect(() => {
@@ -95,50 +123,74 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
     if (!showLogs) return
     const logInterval = setInterval(fetchLogs, 5000)
     return () => clearInterval(logInterval)
-  }, [params.id, showLogs, status])
+    // fetchLogs 为普通函数，刻意只按电网 id / 会话状态 / 面板开关变化刷新
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gridId, showLogs, status])
 
   const fetchGrid = async () => {
     try {
-      const res = await fetch(`/api/grids/${params.id}`)
-      const data = await res.json()
-      setGrid(data)
-      
       let parsedNodes: Node[] = []
       let parsedEdges: Edge[] = []
-      
-      try {
-        const nodesData = typeof data.nodes === 'string' ? JSON.parse(data.nodes) : data.nodes
-        parsedNodes = Array.isArray(nodesData) ? nodesData : []
-      } catch (e) {
-        console.error('Failed to parse nodes:', e)
-        parsedNodes = []
+      let loadedFromDraft = false
+
+      // 草稿预览：优先读取编辑页写入 sessionStorage 的未保存画布数据
+      if (isDraftPreview()) {
+        try {
+          const rawDraft = sessionStorage.getItem(PREVIEW_DRAFT_KEY)
+          if (rawDraft) {
+            const draft = JSON.parse(rawDraft) as { nodes?: unknown; edges?: unknown }
+            parsedNodes = Array.isArray(draft.nodes) ? (draft.nodes as Node[]) : []
+            parsedEdges = Array.isArray(draft.edges) ? (draft.edges as Edge[]) : []
+            loadedFromDraft = true
+          }
+        } catch (e) {
+          // 草稿解析失败时回退到数据库版本
+          console.error('Failed to parse preview draft, falling back to saved grid:', e)
+        }
       }
-      
-      try {
-        const edgesData = typeof data.edges === 'string' ? JSON.parse(data.edges) : data.edges
-        parsedEdges = Array.isArray(edgesData)
-          ? edgesData.map((edge: Edge) => {
-              const sourceNode = parsedNodes.find((n: Node) => n.id === edge.source)
-              const targetNode = parsedNodes.find((n: Node) => n.id === edge.target)
-              const sourceIsTie = sourceNode?.type === 'switch' && sourceNode?.data?.subType === 'tie'
-              const targetIsTie = targetNode?.type === 'switch' && targetNode?.data?.subType === 'tie'
-              const inferredSourceHandle = sourceIsTie
-                ? (edge.sourceHandle ? normalizeTieHandle(edge.sourceHandle, 'source') : inferTieHandle(sourceNode, targetNode, 'source'))
-                : edge.sourceHandle
-              const inferredTargetHandle = targetIsTie
-                ? (edge.targetHandle ? normalizeTieHandle(edge.targetHandle, 'target') : inferTieHandle(targetNode, sourceNode, 'target'))
-                : edge.targetHandle
-              return {
-                ...edge,
-                sourceHandle: inferredSourceHandle,
-                targetHandle: inferredTargetHandle,
-              }
-            })
-          : []
-      } catch (e) {
-        console.error('Failed to parse edges:', e)
-        parsedEdges = []
+
+      if (loadedFromDraft) {
+        setGrid({ id: gridId, name: '预览草稿（未保存）', description: null, nodes: '', edges: '' })
+      } else {
+        const res = await fetch(`/api/grids/${gridId}`)
+        const data = await res.json()
+        setGrid(data)
+
+        try {
+          const nodesData = typeof data.nodes === 'string' ? JSON.parse(data.nodes) : data.nodes
+          parsedNodes = Array.isArray(nodesData) ? nodesData : []
+        } catch (e) {
+          console.error('Failed to parse nodes:', e)
+          parsedNodes = []
+        }
+
+        try {
+          const edgesData = typeof data.edges === 'string' ? JSON.parse(data.edges) : data.edges
+          parsedEdges = Array.isArray(edgesData) ? edgesData : []
+        } catch (e) {
+          console.error('Failed to parse edges:', e)
+          parsedEdges = []
+        }
       }
+
+      // 母联端子推断：草稿与数据库数据统一处理
+      parsedEdges = parsedEdges.map((edge: Edge) => {
+        const sourceNode = parsedNodes.find((n: Node) => n.id === edge.source)
+        const targetNode = parsedNodes.find((n: Node) => n.id === edge.target)
+        const sourceIsTie = sourceNode?.type === 'switch' && sourceNode?.data?.subType === 'tie'
+        const targetIsTie = targetNode?.type === 'switch' && targetNode?.data?.subType === 'tie'
+        const inferredSourceHandle = sourceIsTie
+          ? (edge.sourceHandle ? normalizeTieHandle(edge.sourceHandle, 'source') : inferTieHandle(sourceNode, targetNode, 'source'))
+          : edge.sourceHandle
+        const inferredTargetHandle = targetIsTie
+          ? (edge.targetHandle ? normalizeTieHandle(edge.targetHandle, 'target') : inferTieHandle(targetNode, sourceNode, 'target'))
+          : edge.targetHandle
+        return {
+          ...edge,
+          sourceHandle: inferredSourceHandle,
+          targetHandle: inferredTargetHandle,
+        }
+      })
       
       // 为节点添加模拟功能（含确认弹窗与提示回调，避免在 setState 内写日志导致重复记录）
       const enhancedNodes = parsedNodes.map((node: Node) => ({
@@ -170,7 +222,7 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
 
   const fetchLogs = async () => {
     try {
-      const res = await fetch(`/api/logs?gridId=${params.id}&pageSize=50`)
+      const res = await fetch(`/api/logs?gridId=${gridId}&pageSize=50`)
       const data = await res.json()
       // 接口返回 { logs, total, page, pageSize }，兼容旧的数组格式
       setLogs(Array.isArray(data) ? data : (Array.isArray(data.logs) ? data.logs : []))
@@ -187,12 +239,14 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
   }
 
   const logOperation = async (action: string, targetId: string, details: string) => {
+    // 草稿预览：不写操作日志
+    if (isDraftPreview()) return
     try {
       const response = await fetch('/api/logs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          gridId: params.id,
+          gridId: gridId,
           action,
           targetId,
           details,
@@ -233,7 +287,17 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
 
   const handleLoadToggle = (nodeId: string) => {
     const node = nodesRef.current.find((n) => n.id === nodeId)
-    if (!node || !node.data.powered) return
+    if (!node) return
+    if (!node.data.powered) {
+      // 未通电时给出可见反馈，避免点击无反应
+      const message = '设备未通电，无法启动/停止'
+      if (typeof node.data.onShowMessage === 'function') {
+        node.data.onShowMessage(message, 'error')
+      } else {
+        setToast({ message, type: 'error' })
+      }
+      return
+    }
     const nextStatus = node.data.status === 'running' ? 'stopped' : 'running'
 
     logOperation(
@@ -251,8 +315,10 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
 
   /** 单设备操作落库：只提交本字段的设计态取值 */
   const persistOperation = async (nodeId: string, patch: Record<string, unknown>) => {
+    // 草稿预览：不改动已保存的电网
+    if (isDraftPreview()) return
     try {
-      const res = await fetch(`/api/grids/${params.id}/operate`, {
+      const res = await fetch(`/api/grids/${gridId}/operate`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nodeId, patch }),
@@ -302,7 +368,7 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
       const amp = state?.amp ?? null
       const flowClass =
         flow === 'reverse' ? 'edge-flow-reverse' : flow === 'forward' ? 'edge-flow-forward' : ''
-      const stroke = conflict ? '#ef4444' : active ? voltageToColor(voltage) : '#cbd5e1'
+      const stroke = conflict ? '#ef4444' : active ? voltageToColor(voltage) : tokens.edgeIdle
 
       return {
         ...edge,
@@ -369,7 +435,7 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
     info: 'rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-[11px] text-gray-600',
   }
   return (
-    <div className="h-screen flex flex-col bg-gradient-to-br from-gray-50 to-gray-100">
+    <div className="h-screen flex flex-col" style={{ background: tokens.bg }}>
       {/* 顶部导航栏 */}
       <nav className="bg-white border-b border-gray-200 shadow-sm">
         <div className="px-6 py-4">
@@ -390,6 +456,12 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
                 ● 模拟运行
               </span>
             </div>
+              <button
+                onClick={() => router.push('/settings')}
+                className="px-4 py-2 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50"
+              >
+                外观
+              </button>
             
             <div className="flex items-center space-x-3">
               <button
@@ -409,6 +481,15 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
           </div>
         </div>
       </nav>
+
+      {draftMode && (
+        <div className="flex items-center justify-center gap-2 bg-amber-400 px-4 py-2 text-sm font-bold text-amber-950 shadow-sm">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          预览模式：操作不会保存
+        </div>
+      )}
 
       <div className="flex-1 flex overflow-hidden">
         {/* 左侧状态面板 */}
@@ -572,7 +653,7 @@ export default function SimulateGridPage({ params }: { params: { id: string } })
             fitView
             className="bg-gradient-to-br from-gray-50 to-gray-100"
           >
-            <Background color="#d1d5db" gap={20} size={1} />
+            <Background color={tokens.grid} gap={20} size={1} />
             <Controls showInteractive={false} />
             <MiniMap
               nodeColor={(node) => {

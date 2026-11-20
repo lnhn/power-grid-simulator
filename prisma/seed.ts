@@ -4,14 +4,22 @@ import bcrypt from 'bcryptjs'
 const prisma = new PrismaClient()
 
 async function main() {
-  // 创建测试用户：密码来自环境变量，避免在源码与日志中固化明文口令
-  const seedPassword = process.env.SEED_PASSWORD ?? 'password'
-  const hashedPassword = await bcrypt.hash(seedPassword, 10)
+  // 生产环境必须显式提供初始口令，禁止使用弱默认值
+  const seedPassword = process.env.SEED_PASSWORD
+  if (!seedPassword && process.env.NODE_ENV === 'production') {
+    throw new Error('生产环境必须设置 SEED_PASSWORD')
+  }
+  if (!seedPassword) {
+    console.warn('警告：未设置 SEED_PASSWORD，本地开发使用默认口令。生产环境请务必覆盖。')
+  }
+  const hashedPassword = await bcrypt.hash(seedPassword ?? 'password', 10)
+  const tenantId = process.env.SEED_TENANT_ID ?? 'default'
 
   const engineer = await prisma.user.upsert({
     where: { username: 'engineer' },
     update: {},
     create: {
+      tenantId,
       username: 'engineer',
       password: hashedPassword,
       role: 'ENGINEER',
@@ -22,6 +30,7 @@ async function main() {
     where: { username: 'operator' },
     update: {},
     create: {
+      tenantId,
       username: 'operator',
       password: hashedPassword,
       role: 'OPERATOR',
@@ -34,6 +43,7 @@ async function main() {
     update: {},
     create: {
       id: 'sample-grid',
+      tenantId,
       name: '示例电网 - 车间A',
       description: '包含三相电源、断路器保护和多种用电设备的典型工业电网',
       nodes: JSON.stringify([

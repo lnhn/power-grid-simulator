@@ -2,14 +2,18 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions, requireRole } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { getScopedGrid } from '@/lib/tenant'
+import { toPersistedNodes, toPersistedEdges } from '@/lib/grid/persist'
 
 /**
- * 模拟状态同步：仅更新 nodes/edges，允许工程师和操作员在模拟时持久化当前状态
+ * 模拟状态同步：仅更新设计态的位置/开关位置，运行态字段由 toPersisted* 剥离。
+ * 仍保留此路由以兼容旧客户端，但禁止把带电/电位/流向写回数据库。
  */
 export async function PATCH(
   request: Request,
-  { params }: { params: { id: string } }
+  { params: paramsPromise }: { params: Promise<{ id: string }> }
 ) {
+  const params = await paramsPromise
   try {
     const session = await getServerSession(authOptions)
     const denied = requireRole(session, ['ENGINEER', 'OPERATOR'])
@@ -17,21 +21,24 @@ export async function PATCH(
 
     const { nodes, edges } = await request.json()
 
-    if (nodes === undefined || edges === undefined) {
+    if (!Array.isArray(nodes) || !Array.isArray(edges)) {
       return NextResponse.json(
-        { error: '缺少 nodes 或 edges' },
+        { error: 'nodes 与 edges 必须是数组' },
         { status: 400 }
       )
     }
 
-    const existing = await prisma.powerGrid.findUnique({ where: { id: params.id } })
+    const existing = await getScopedGrid(session, params.id)
     if (!existing) {
       return NextResponse.json({ error: 'Grid not found' }, { status: 404 })
     }
 
     const grid = await prisma.powerGrid.update({
       where: { id: params.id },
-      data: { nodes, edges },
+      data: {
+        nodes: JSON.stringify(toPersistedNodes(nodes)),
+        edges: JSON.stringify(toPersistedEdges(edges)),
+      },
     })
 
     return NextResponse.json(grid)

@@ -1,4 +1,5 @@
 export { buildGridModels, inferSide, inferTieHandle, normalizeTieHandle, parseTieTerminal } from './adapter'
+export type { GridNode, GridEdge, GridNodeData } from './adapter'
 export { normalizeEdgeVoltage, normalizeNodeData } from './normalize'
 export { GridSolver, voltageToColor } from './engine/GridSolver'
 export { EdgeModel } from './models/EdgeModel'

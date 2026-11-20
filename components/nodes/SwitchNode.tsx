@@ -1,7 +1,8 @@
 import { memo } from 'react'
-import { Handle, Position, NodeProps } from 'reactflow'
+import { Handle, Position, type NodeProps } from '@xyflow/react'
+import type { GridNode } from '@/lib/grid'
 
-export const SwitchNode = memo(({ data, selected }: NodeProps) => {
+export const SwitchNode = memo(({ data, selected }: NodeProps<GridNode>) => {
   const isOn = data.status === 'on'
   const isTie = data.subType === 'tie'
   

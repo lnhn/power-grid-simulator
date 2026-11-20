@@ -1,7 +1,8 @@
 import { memo } from 'react'
-import { Handle, Position, NodeProps } from 'reactflow'
+import { Handle, Position, type NodeProps } from '@xyflow/react'
+import type { GridNode } from '@/lib/grid'
 
-export const SimulateBusNode = memo(({ data }: NodeProps) => {
+export const SimulateBusNode = memo(({ data }: NodeProps<GridNode>) => {
   const isPowered = data.powered
   const portStatus = data.portStatus || {}
   const topPowered = portStatus.top ?? isPowered

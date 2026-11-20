@@ -2,8 +2,9 @@
 
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { useSession } from 'next-auth/react'
-import { useRouter } from 'next/navigation'
-import ReactFlow, {
+import { useParams, useRouter } from 'next/navigation'
+import {
+  ReactFlow,
   Background,
   Controls,
   MiniMap,
@@ -22,10 +23,11 @@ import ReactFlow, {
   Position,
   useReactFlow,
   ReactFlowInstance,
-} from 'reactflow'
-import 'reactflow/dist/style.css'
+} from '@xyflow/react'
+import '@xyflow/react/dist/style.css'
 
 interface EdgeControlData {
+  [key: string]: unknown
   controlOffsetX?: number
   controlOffsetY?: number // legacy
   sourceOffsetY?: number
@@ -40,6 +42,17 @@ const EDGE_OFFSET_SNAP = 2
 const EDGE_EPSILON = 1
 const EDGE_ALIGN_TOLERANCE = 4
 const EDGE_SHORT_SEGMENT_MIN = 8
+
+// 编辑页与预览页共享的草稿键（sessionStorage，仅当前标签页有效）
+const PREVIEW_DRAFT_KEY = 'pg-preview-draft'
+
+/** 数值输入解析：0 保持为 0；空串写 0；非数字才回退默认值，避免 `|| 默认值` 吞掉 0 */
+const toNumberInput = (raw: string, fallback: number): number => {
+  const trimmed = raw.trim()
+  if (trimmed === '') return 0
+  const parsed = Number(trimmed)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
 
 const getHandleDirection = (position: Position): Point => {
   if (position === Position.Left) return { x: -1, y: 0 }
@@ -254,7 +267,7 @@ import { SwitchNode } from '@/components/nodes/SwitchNode'
 import { LoadNode } from '@/components/nodes/LoadNode'
 import { BusNode } from '@/components/nodes/BusNode'
 import { TransformerNode } from '@/components/nodes/TransformerNode'
-import { buildGridModels, GridSolver, NodeModel, inferSide, inferTieHandle, normalizeNodeData, normalizeTieHandle } from '@/lib/grid'
+import { buildGridModels, GridSolver, NodeModel, inferSide, inferTieHandle, normalizeNodeData, normalizeTieHandle, type GridNode, type GridEdge } from '@/lib/grid'
 import { Toast } from '@/components/Toast'
 
 const nodeTypes = {
@@ -269,20 +282,13 @@ const edgeTypes = {
   smoothstep: UpdatableEdge,
 }
 
-interface GridData {
-  id: string
-  name: string
-  description: string | null
-  nodes: string
-  edges: string
-}
-
-export default function EditGridPage({ params }: { params: { id: string } }) {
+export default function EditGridPage() {
+  // Next 16 中页面 params 为 Promise，客户端组件统一通过 useParams 读取
+  const { id: gridId } = useParams<{ id: string }>()
   const { data: session, status } = useSession()
   const router = useRouter()
-  const [nodes, setNodes, baseOnNodesChange] = useNodesState([])
-  const [edges, setEdges, baseOnEdgesChange] = useEdgesState([])
-  const [grid, setGrid] = useState<GridData | null>(null)
+  const [nodes, setNodes, baseOnNodesChange] = useNodesState<GridNode>([])
+  const [edges, setEdges, baseOnEdgesChange] = useEdgesState<GridEdge>([])
   const [gridName, setGridName] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -307,8 +313,35 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
   const nodesRef = useRef<Node[]>([])
   const edgesRef = useRef<Edge[]>([])
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
-  nodesRef.current = nodes
-  edgesRef.current = edges
+  const [hasClipboard, setHasClipboard] = useState(false)
+
+  // 同步最新画布到 ref，供事件回调读取；在 effect 中写入避免渲染期变更 ref
+  useEffect(() => {
+    nodesRef.current = nodes
+  }, [nodes])
+  useEffect(() => {
+    edgesRef.current = edges
+  }, [edges])
+
+  /** 打开模拟预览：把当前未保存画布写入草稿，供 iframe 内的预览页读取 */
+  const openPreview = () => {
+    try {
+      sessionStorage.setItem(PREVIEW_DRAFT_KEY, JSON.stringify({ nodes, edges }))
+    } catch (e) {
+      console.error('Failed to save preview draft:', e)
+    }
+    setPreviewDrawerOpen(true)
+  }
+
+  /** 关闭模拟预览：清除草稿，避免残留影响下次打开 */
+  const closePreview = () => {
+    try {
+      sessionStorage.removeItem(PREVIEW_DRAFT_KEY)
+    } catch (e) {
+      console.error('Failed to clear preview draft:', e)
+    }
+    setPreviewDrawerOpen(false)
+  }
 
   const pushHistory = useCallback((nextNodes: Node[], nextEdges: Edge[]) => {
     if (isRestoringRef.current) return
@@ -382,6 +415,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
       edges: JSON.parse(JSON.stringify(edgesToCopy)) as Edge[],
       mode: 'copy',
     }
+    setHasClipboard(true)
   }, [nodes, edges])
 
   const handleCut = useCallback(() => {
@@ -406,6 +440,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
       edges: JSON.parse(JSON.stringify(edgesToCopy)) as Edge[],
       mode: 'cut',
     }
+    setHasClipboard(true)
     deleteSelectedElements()
   }, [nodes, edges, deleteSelectedElements])
 
@@ -451,6 +486,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
 
     if (mode === 'cut') {
       clipboardRef.current = null
+      setHasClipboard(false)
     }
   }, [edges, nodes, pushHistory, setNodes, setEdges])
 
@@ -627,7 +663,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
 
   const openContextMenu = useCallback(
     (
-      event: React.MouseEvent,
+      event: MouseEvent | React.MouseEvent,
       type: 'node' | 'edge' | 'pane',
       target?: { nodeId?: string; edgeId?: string }
     ) => {
@@ -687,7 +723,9 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
   useEffect(() => {
     if (status === 'loading' || status === 'unauthenticated') return
     fetchGrid()
-  }, [params.id, status])
+    // 仅在会话或电网 id 变化时加载；fetchGrid 为普通函数，刻意不入依赖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gridId, status])
 
   useEffect(() => {
     if (!selectedEdge) return
@@ -768,9 +806,8 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
 
   const fetchGrid = async () => {
     try {
-      const res = await fetch(`/api/grids/${params.id}`)
+      const res = await fetch(`/api/grids/${gridId}`)
       const data = await res.json()
-      setGrid(data)
       setGridName(data.name || '')
       
       // 安全解析 JSON，确保返回数组
@@ -843,12 +880,12 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
       const source = params.source
       const target = params.target
       if (!source || !target) return
-      const sourceNode = nodes.find((n) => n.id === source)
-      const targetNode = nodes.find((n) => n.id === target)
+      // 节点从 ref 读取，连线从 setEdges 的函数式更新读取，避免使用过期的 edges 快照
+      const currentNodes = nodesRef.current
+      const sourceNode = currentNodes.find((n) => n.id === source)
+      const targetNode = currentNodes.find((n) => n.id === target)
       if (!sourceNode || !targetNode) return
-      const sourceIsTie = sourceNode?.type === 'switch' && sourceNode?.data?.subType === 'tie'
-      const targetIsTie = targetNode?.type === 'switch' && targetNode?.data?.subType === 'tie'
-      const nodeMap = new Map(nodes.map((node) => [node.id, node]))
+      const nodeMap = new Map(currentNodes.map((node) => [node.id, node]))
       const sourceModel = toNodeModel(sourceNode)
       const targetModel = toNodeModel(targetNode)
       const tempEdge = {
@@ -872,62 +909,63 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
         return
       }
 
-      // 母联：只能接母线，每个端子只能接一条母线
-      const tieModel = sourceModel.isTie() ? sourceModel : targetModel.isTie() ? targetModel : null
-      if (tieModel) {
-        const peerModel = sourceModel.isTie() ? targetModel : sourceModel
-        const tieSide = sourceModel.isTie() ? sourceSide : targetSide
-        if (peerModel.type !== 'bus') {
-          setToast({ message: '母联只能连接母线', type: 'error' })
-          return
-        }
-        const occupied = edges.some((edge) => {
-          if (edge.source !== tieModel.id && edge.target !== tieModel.id) return false
-          return inferSide(tieModel.id, edge, edge.source === tieModel.id, nodeMap) === tieSide
-        })
-        if (occupied) {
-          setToast({ message: '该端子已连接一条母线，请从另一端子接入', type: 'error' })
-          return
-        }
-      }
-
-      if (!targetModel.isTie()) {
-        const existingInput = edges.some((edge) => {
-          if (edge.target !== target) return false
-          const edgeTargetSide = inferSide(target, edge, false, nodeMap)
-          return edgeTargetSide === inputSide
-        })
-        if (existingInput) {
-          setToast({ message: '该节点输入端口已连接一条线路', type: 'error' })
-          return
-        }
-      }
-      const edge: Edge = {
-        id: `e-${source}-${target}-${Date.now()}`,
-        source,
-        target,
-        sourceHandle: params.sourceHandle,
-        targetHandle: params.targetHandle,
-        type: 'smoothstep', // 曼哈顿式连线
-        markerEnd: { type: MarkerType.ArrowClosed },
-        style: { strokeWidth: 2, stroke: '#64748b' },
-        animated: false,
-        data: {
-          controlOffsetX: 0,
-          sourceOffsetY: 0,
-          targetOffsetY: 0,
-          controlOffsetY: 0,
-          isActive: false,
-          voltage: 380,
-        } as EdgeControlData,
-      }
       setEdges((eds) => {
+        // 母联：只能接母线，每个端子只能接一条母线（基于最新 eds 校验）
+        const tieModel = sourceModel.isTie() ? sourceModel : targetModel.isTie() ? targetModel : null
+        if (tieModel) {
+          const peerModel = sourceModel.isTie() ? targetModel : sourceModel
+          const tieSide = sourceModel.isTie() ? sourceSide : targetSide
+          if (peerModel.type !== 'bus') {
+            setToast({ message: '母联只能连接母线', type: 'error' })
+            return eds
+          }
+          const occupied = eds.some((edge) => {
+            if (edge.source !== tieModel.id && edge.target !== tieModel.id) return false
+            return inferSide(tieModel.id, edge, edge.source === tieModel.id, nodeMap) === tieSide
+          })
+          if (occupied) {
+            setToast({ message: '该端子已连接一条母线，请从另一端子接入', type: 'error' })
+            return eds
+          }
+        }
+
+        if (!targetModel.isTie()) {
+          const existingInput = eds.some((edge) => {
+            if (edge.target !== target) return false
+            const edgeTargetSide = inferSide(target, edge, false, nodeMap)
+            return edgeTargetSide === inputSide
+          })
+          if (existingInput) {
+            setToast({ message: '该节点输入端口已连接一条线路', type: 'error' })
+            return eds
+          }
+        }
+
+        const edge: Edge = {
+          id: `e-${source}-${target}-${Date.now()}`,
+          source,
+          target,
+          sourceHandle: params.sourceHandle,
+          targetHandle: params.targetHandle,
+          type: 'smoothstep', // 曼哈顿式连线
+          markerEnd: { type: MarkerType.ArrowClosed },
+          style: { strokeWidth: 2, stroke: '#64748b' },
+          animated: false,
+          data: {
+            controlOffsetX: 0,
+            sourceOffsetY: 0,
+            targetOffsetY: 0,
+            controlOffsetY: 0,
+            isActive: false,
+            voltage: 380,
+          } as EdgeControlData,
+        }
         const next = addEdge(edge, eds)
-        pushHistory(nodes, next)
+        pushHistory(currentNodes, next)
         return next
       })
     },
-    [setEdges, nodes]
+    [setEdges, pushHistory, toNodeModel]
   )
 
   const addNode = (type: string, subType?: string, position?: { x: number; y: number }) => {
@@ -1107,22 +1145,19 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
     event.dataTransfer.dropEffect = 'move'
   }, [])
 
-  const onDrop = useCallback(
-    (event: React.DragEvent) => {
-      event.preventDefault()
-      const type = event.dataTransfer.getData('application/reactflow')
-      if (!type) return
-      const subType = event.dataTransfer.getData('application/reactflow-subtype') || undefined
-      const bounds = reactFlowWrapper.current?.getBoundingClientRect()
-      if (!bounds || !rfInstance) return
-      const position = rfInstance.project({
-        x: event.clientX - bounds.left,
-        y: event.clientY - bounds.top,
-      })
-      addNode(type, subType, position)
-    },
-    [addNode, rfInstance, reactFlowWrapper]
-  )
+  const onDrop = (event: React.DragEvent) => {
+    event.preventDefault()
+    const type = event.dataTransfer.getData('application/reactflow')
+    if (!type) return
+    const subType = event.dataTransfer.getData('application/reactflow-subtype') || undefined
+    const bounds = reactFlowWrapper.current?.getBoundingClientRect()
+    if (!bounds || !rfInstance) return
+    const position = rfInstance.screenToFlowPosition({
+      x: event.clientX - bounds.left,
+      y: event.clientY - bounds.top,
+    })
+    addNode(type, subType, position)
+  }
 
   const handleDragStart = useCallback(
     (type: string, subType?: string) => (event: React.DragEvent) => {
@@ -1180,7 +1215,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
         })
       })
 
-      const response = await fetch(`/api/grids/${params.id}`, {
+      const response = await fetch(`/api/grids/${gridId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1209,7 +1244,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
     (changes: Parameters<typeof baseOnNodesChange>[0]) => {
       baseOnNodesChange(changes)
       if (isRestoringRef.current) return
-      if (changes.some((change) => change.type !== 'select')) {
+      if (Array.from(changes).some((change) => change.type !== 'select')) {
         scheduleHistoryPush()
       }
     },
@@ -1220,7 +1255,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
     (changes: Parameters<typeof baseOnEdgesChange>[0]) => {
       baseOnEdgesChange(changes)
       if (isRestoringRef.current) return
-      if (changes.some((change) => change.type !== 'select')) {
+      if (Array.from(changes).some((change) => change.type !== 'select')) {
         scheduleHistoryPush()
       }
     },
@@ -1236,7 +1271,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
       nds.map((node) => {
         if (!node.selected) return node
 
-        let newPosition = { ...node.position }
+        const newPosition = { ...node.position }
 
         switch (direction) {
           case 'left':
@@ -1285,7 +1320,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
         const index = selectedNodes.findIndex(n => n.id === node.id)
         if (index === -1 || index === 0 || index === selectedNodes.length - 1) return node
 
-        let newPosition = { ...node.position }
+        const newPosition = { ...node.position }
         if (direction === 'horizontal') {
           newPosition.x = first.position.x + gap * index
         } else {
@@ -1485,7 +1520,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
               <span>{saving ? '保存中...' : '保存'}</span>
             </button>
             <button
-              onClick={() => setPreviewDrawerOpen(true)}
+              onClick={openPreview}
               className="flex items-center space-x-2 px-4 py-2 rounded-lg transition shadow-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1893,7 +1928,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                       min={1}
                       max={5000}
                       value={selectedNode.data?.ratedCurrent ?? 630}
-                      onChange={(e) => updateSelectedNodeData({ ratedCurrent: Number(e.target.value) || 630 })}
+                      onChange={(e) => updateSelectedNodeData({ ratedCurrent: toNumberInput(e.target.value, 630) })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                     />
                   </div>
@@ -1920,7 +1955,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                         min={1}
                         max={500}
                         value={selectedNode.data?.power ?? 50}
-                        onChange={(e) => updateSelectedNodeData({ power: Number(e.target.value) || 50 })}
+                        onChange={(e) => updateSelectedNodeData({ power: toNumberInput(e.target.value, 50) })}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                       />
                     </div>
@@ -1986,7 +2021,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                       min={1}
                       max={1000}
                       value={selectedNode.data?.voltage ?? 380}
-                      onChange={(e) => updateSelectedNodeData({ voltage: Number(e.target.value) || 380 })}
+                      onChange={(e) => updateSelectedNodeData({ voltage: toNumberInput(e.target.value, 380) })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                     />
                   </div>
@@ -2001,7 +2036,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                         min={1}
                         max={100000}
                         value={selectedNode.data?.voltage ?? 380}
-                        onChange={(e) => updateSelectedNodeData({ voltage: Number(e.target.value) || 380 })}
+                        onChange={(e) => updateSelectedNodeData({ voltage: toNumberInput(e.target.value, 380) })}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                       />
                     </div>
@@ -2012,7 +2047,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                         min={0.01}
                         step={0.01}
                         value={selectedNode.data?.ratio ?? 1}
-                        onChange={(e) => updateSelectedNodeData({ ratio: Number(e.target.value) || 1 })}
+                        onChange={(e) => updateSelectedNodeData({ ratio: toNumberInput(e.target.value, 1) })}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                       />
                     </div>
@@ -2023,7 +2058,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                         min={1}
                         max={100000}
                         value={selectedNode.data?.capacity ?? 1000}
-                        onChange={(e) => updateSelectedNodeData({ capacity: Number(e.target.value) || 1000 })}
+                        onChange={(e) => updateSelectedNodeData({ capacity: toNumberInput(e.target.value, 1000) })}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                       />
                     </div>
@@ -2055,7 +2090,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                       type="number"
                       value={Math.round(selectedEdgeData.controlOffsetX ?? 0)}
                       onChange={(event) =>
-                        updateSelectedEdgeData({ controlOffsetX: Number(event.target.value) || 0 })
+                        updateSelectedEdgeData({ controlOffsetX: toNumberInput(event.target.value, 0) })
                       }
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                     />
@@ -2066,7 +2101,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                       type="number"
                       value={Math.round(selectedEdgeData.sourceOffsetY ?? selectedEdgeData.controlOffsetY ?? 0)}
                       onChange={(event) =>
-                        updateSelectedEdgeData({ sourceOffsetY: Number(event.target.value) || 0 })
+                        updateSelectedEdgeData({ sourceOffsetY: toNumberInput(event.target.value, 0) })
                       }
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                     />
@@ -2080,7 +2115,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                     max={100000}
                     value={Math.round(selectedEdgeData.voltage ?? 380)}
                     onChange={(event) =>
-                      updateSelectedEdgeData({ voltage: Number(event.target.value) || 380 })
+                      updateSelectedEdgeData({ voltage: toNumberInput(event.target.value, 380) })
                     }
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                   />
@@ -2091,7 +2126,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
                     type="number"
                     value={Math.round(selectedEdgeData.targetOffsetY ?? selectedEdgeData.controlOffsetY ?? 0)}
                     onChange={(event) =>
-                      updateSelectedEdgeData({ targetOffsetY: Number(event.target.value) || 0 })
+                      updateSelectedEdgeData({ targetOffsetY: toNumberInput(event.target.value, 0) })
                     }
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                   />
@@ -2152,30 +2187,30 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onContextMenu={(event) => event.preventDefault()}
         >
-          {(() => {
-            const hasSelection = nodes.some((node) => node.selected) || edges.some((edge) => edge.selected)
-            const canPaste = Boolean(clipboardRef.current)
-            const items = [
-              { label: '复制', show: contextMenu.type !== 'pane' && hasSelection, onClick: handleCopy },
-              { label: '剪切', show: contextMenu.type !== 'pane' && hasSelection, onClick: handleCut },
-              { label: '粘贴', show: canPaste, onClick: handlePaste },
-              { label: '删除', show: contextMenu.type !== 'pane' && hasSelection, onClick: deleteSelectedElements },
-            ]
-            return items
-              .filter((item) => item.show)
-              .map((item) => (
-                <button
-                  key={item.label}
-                  onClick={() => {
-                    item.onClick()
-                    setContextMenu((prev) => ({ ...prev, open: false }))
-                  }}
-                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                >
-                  {item.label}
-                </button>
-              ))
-          })()}
+          {contextMenu.type !== 'pane' && (nodes.some((node) => node.selected) || edges.some((edge) => edge.selected)) && (
+            <>
+              <button
+                onClick={() => { handleCopy(); setContextMenu((prev) => ({ ...prev, open: false })) }}
+                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              >复制</button>
+              <button
+                onClick={() => { handleCut(); setContextMenu((prev) => ({ ...prev, open: false })) }}
+                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              >剪切</button>
+            </>
+          )}
+          {hasClipboard && (
+            <button
+              onClick={() => { handlePaste(); setContextMenu((prev) => ({ ...prev, open: false })) }}
+              className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+            >粘贴</button>
+          )}
+          {contextMenu.type !== 'pane' && (nodes.some((node) => node.selected) || edges.some((edge) => edge.selected)) && (
+            <button
+              onClick={() => { deleteSelectedElements(); setContextMenu((prev) => ({ ...prev, open: false })) }}
+              className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+            >删除</button>
+          )}
         </div>
       )}
 
@@ -2183,13 +2218,13 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
         <div className="fixed inset-0 z-50">
           <div
             className="absolute inset-0 bg-black/40"
-            onClick={() => setPreviewDrawerOpen(false)}
+            onClick={closePreview}
           />
           <div className="absolute right-0 top-0 h-full w-[80vw] min-w-[420px] bg-white shadow-2xl flex flex-col">
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
               <div className="text-sm font-semibold text-gray-800">模拟预览</div>
               <button
-                onClick={() => setPreviewDrawerOpen(false)}
+                onClick={closePreview}
                 className="p-2 rounded-lg hover:bg-gray-100 transition"
                 aria-label="关闭预览"
               >
@@ -2200,7 +2235,7 @@ export default function EditGridPage({ params }: { params: { id: string } }) {
             </div>
             <iframe
               title="模拟预览"
-              src={`/grid/${params.id}/simulate`}
+              src={`/grid/${gridId}/simulate?draft=1`}
               className="flex-1 w-full border-0"
             />
           </div>

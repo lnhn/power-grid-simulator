@@ -12,16 +12,20 @@ datasource db {
 
 model User {
   id        String   @id @default(cuid())
+  tenantId  String   @default("default")
   username  String   @unique
   password  String
   role      String   @default("OPERATOR")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   logs      OperationLog[]
+
+  @@index([tenantId])
 }
 
 model PowerGrid {
   id          String     @id @default(cuid())
+  tenantId    String     @default("default")
   name        String
   description String?
   nodes       String     // JSON string of nodes
@@ -30,6 +34,8 @@ model PowerGrid {
   updatedAt   DateTime   @updatedAt
   logs        OperationLog[]
   equipment   Equipment[] // 设备清单：保存电网时自动从节点同步
+
+  @@index([tenantId])
 }
 
 model OperationLog {

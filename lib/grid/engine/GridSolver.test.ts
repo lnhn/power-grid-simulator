@@ -227,6 +227,113 @@ describe('GridSolver', () => {
 
     expect(result.voltageConflict.size).toBe(0)
   })
+
+  it('lists the upstream source on a transformer-fed section and reports its output', () => {
+    const nodes = [
+      new NodeModel('ps', 'powerSource', { ratedVoltage: 1000 }),
+      new NodeModel('tx', 'transformer', { ratedVoltage: 1000, ratio: 0.4 }),
+      new NodeModel('bus', 'bus', { ratedVoltage: 400 }),
+      new NodeModel('m', 'load', { running: true, ratedPower: 100 }),
+    ]
+    const edges = [
+      new EdgeModel('e1', portId('ps', 'bottom'), portId('tx', 'top'), 1000),
+      new EdgeModel('e2', portId('tx', 'bottom'), portId('bus', 'top'), 400),
+      new EdgeModel('e3', portId('bus', 'bottom'), portId('m', 'top'), 400),
+    ]
+    const result = GridSolver.solve(nodes, edges)
+    const section = result.sections.find((item) => item.busIds.includes('bus'))
+
+    // 变压器二次侧母线应列出经变压器传播来的电源
+    expect(section?.sourceIds).toContain('ps')
+    expect(result.sourceOutput.get('ps')).toBe(100)
+    expect(result.totalKw).toBe(100)
+  })
+
+  it('keeps the sum of sourceOutput equal to totalKw', () => {
+    const nodes = [
+      new NodeModel('ps1', 'powerSource', { ratedVoltage: 380 }),
+      new NodeModel('ps2', 'powerSource', { ratedVoltage: 380 }),
+      new NodeModel('b1', 'bus', { ratedVoltage: 380 }),
+      new NodeModel('b2', 'bus', { ratedVoltage: 380 }),
+      new NodeModel('m1', 'load', { running: true, ratedPower: 100 }),
+      new NodeModel('m2', 'load', { running: true, ratedPower: 250 }),
+    ]
+    const edges = [
+      new EdgeModel('e1', portId('ps1', 'bottom'), portId('b1', 'top'), 380),
+      new EdgeModel('e2', portId('m1', 'top'), portId('b1', 'bottom'), 380),
+      new EdgeModel('e3', portId('ps2', 'bottom'), portId('b2', 'top'), 380),
+      new EdgeModel('e4', portId('m2', 'top'), portId('b2', 'bottom'), 380),
+    ]
+    const result = GridSolver.solve(nodes, edges)
+    const sum = Array.from(result.sourceOutput.values()).reduce((acc, kw) => acc + kw, 0)
+
+    expect(result.totalKw).toBe(350)
+    expect(sum).toBe(result.totalKw)
+  })
+
+  it('accumulates one source output across two transformer-fed sections', () => {
+    const nodes = [
+      new NodeModel('ps', 'powerSource', { ratedVoltage: 1000 }),
+      new NodeModel('tx1', 'transformer', { ratedVoltage: 1000, ratio: 0.4 }),
+      new NodeModel('tx2', 'transformer', { ratedVoltage: 1000, ratio: 0.4 }),
+      new NodeModel('busA', 'bus', { ratedVoltage: 400 }),
+      new NodeModel('busB', 'bus', { ratedVoltage: 400 }),
+      new NodeModel('m1', 'load', { running: true, ratedPower: 100 }),
+      new NodeModel('m2', 'load', { running: true, ratedPower: 150 }),
+    ]
+    const edges = [
+      new EdgeModel('e1', portId('ps', 'bottom'), portId('tx1', 'top'), 1000),
+      new EdgeModel('e2', portId('tx1', 'bottom'), portId('busA', 'top'), 400),
+      new EdgeModel('e3', portId('busA', 'bottom'), portId('m1', 'top'), 400),
+      new EdgeModel('e4', portId('ps', 'bottom'), portId('tx2', 'top'), 1000),
+      new EdgeModel('e5', portId('tx2', 'bottom'), portId('busB', 'top'), 400),
+      new EdgeModel('e6', portId('busB', 'bottom'), portId('m2', 'top'), 400),
+    ]
+    const result = GridSolver.solve(nodes, edges)
+
+    // 同一电源经两台变压器供两段：两段负荷累加到同一电源，而不是相互覆盖
+    expect(result.sourceOutput.get('ps')).toBe(250)
+    expect(result.totalKw).toBe(250)
+    expect(result.sections).toHaveLength(2)
+    result.sections.forEach((section) => expect(section.sourceIds).toContain('ps'))
+  })
+
+  it('does not energize or count load power at 0V or with a zero transformer ratio', () => {
+    const zeroSource = GridSolver.solve(
+      [
+        new NodeModel('ps', 'powerSource', { ratedVoltage: 0 }),
+        new NodeModel('bus', 'bus', {}),
+        new NodeModel('m', 'load', { running: true, ratedPower: 100 }),
+      ],
+      [
+        new EdgeModel('e1', portId('ps', 'bottom'), portId('bus', 'top'), 0),
+        new EdgeModel('e2', portId('bus', 'bottom'), portId('m', 'top'), 0),
+      ]
+    )
+    expect(zeroSource.totalKw).toBe(0)
+    expect(zeroSource.loadKw.get('m')).toBe(0)
+    expect(zeroSource.sections[0].energized).toBe(false)
+    expect(zeroSource.nodePowered.get('bus')).toBe(false)
+    expect(zeroSource.nodePowered.get('m')).toBe(false)
+
+    const zeroRatio = GridSolver.solve(
+      [
+        new NodeModel('ps', 'powerSource', { ratedVoltage: 1000 }),
+        new NodeModel('tx', 'transformer', { ratedVoltage: 1000, ratio: 0 }),
+        new NodeModel('bus', 'bus', { ratedVoltage: 400 }),
+        new NodeModel('m', 'load', { running: true, ratedPower: 100 }),
+      ],
+      [
+        new EdgeModel('e1', portId('ps', 'bottom'), portId('tx', 'top'), 1000),
+        new EdgeModel('e2', portId('tx', 'bottom'), portId('bus', 'top'), 0),
+        new EdgeModel('e3', portId('bus', 'bottom'), portId('m', 'top'), 0),
+      ]
+    )
+    expect(zeroRatio.totalKw).toBe(0)
+    expect(zeroRatio.loadKw.get('m')).toBe(0)
+    expect(zeroRatio.sections[0].energized).toBe(false)
+    expect(zeroRatio.nodePowered.get('m')).toBe(false)
+  })
 })
 describe('tie operation modes', () => {
   const busNode = (id: string, x: number, y: number, voltage: number) => ({ id, type: 'bus', position: { x, y }, data: { voltage } })
@@ -373,7 +480,7 @@ describe('power aggregation', () => {
     expect(result.sections[0].currentA).toBeCloseTo(expected, 1)
   })
 
-  it('splits section load evenly between parallel sources when the tie is closed', () => {
+  it('attributes parallel-source load along each source tree (first arrival)', () => {
     const nodes: unknown[] = [
       src('ps1', 100, 60),
       bus('b1', 300, 160),
@@ -395,8 +502,12 @@ describe('power aggregation', () => {
     const result = GridSolver.solve(nodeModels, edgeModels)
     expect(result.sections).toHaveLength(1)
     expect(result.totalKw).toBe(400)
-    expect(result.sourceOutput.get('ps1')).toBe(200)
-    expect(result.sourceOutput.get('ps2')).toBe(200)
+    // 先到先得：ps1 供 m1(100kW)，ps2 供 m2(300kW)，不再是段内平均分摊
+    expect(result.sourceOutput.get('ps1')).toBe(100)
+    expect(result.sourceOutput.get('ps2')).toBe(300)
+    // sourceOutput 与 edgeKw 同口径：电源出力等于其馈线边功率
+    expect(result.edgeStates.get('e1')?.kw).toBe(100)
+    expect(result.edgeStates.get('e4')?.kw).toBe(300)
     expect(result.ties.get('tie')?.mode).toBe('parallel')
   })
 
@@ -418,6 +529,31 @@ describe('power aggregation', () => {
     expect(result.edgeStates.get('e1')?.kw).toBe(100)
     expect(result.edgeStates.get('e1')?.amp).toBeCloseTo((100 * 1000) / (Math.sqrt(3) * 1000 * 0.85), 1)
     expect(result.edgeStates.get('e3')?.amp).toBeCloseTo((100 * 1000) / (Math.sqrt(3) * 400 * 0.85), 1)
+  })
+
+  it('matches sourceOutput to feeder edge power with multiple sources', () => {
+    const nodes = [
+      new NodeModel('ps1', 'powerSource', { ratedVoltage: 380 }),
+      new NodeModel('ps2', 'powerSource', { ratedVoltage: 380 }),
+      new NodeModel('b1', 'bus', { ratedVoltage: 380 }),
+      new NodeModel('b2', 'bus', { ratedVoltage: 380 }),
+      new NodeModel('m1', 'load', { running: true, ratedPower: 120 }),
+      new NodeModel('m2', 'load', { running: true, ratedPower: 80 }),
+    ]
+    const edges = [
+      new EdgeModel('f1', portId('ps1', 'bottom'), portId('b1', 'top'), 380),
+      new EdgeModel('f2', portId('ps2', 'bottom'), portId('b2', 'top'), 380),
+      new EdgeModel('d1', portId('b1', 'bottom'), portId('m1', 'top'), 380),
+      new EdgeModel('d2', portId('b2', 'bottom'), portId('m2', 'top'), 380),
+    ]
+    const result = GridSolver.solve(nodes, edges)
+
+    // 多电源：电源出力与各自馈线边功率同口径，且总和等于 totalKw
+    expect(result.sourceOutput.get('ps1')).toBe(result.edgeStates.get('f1')?.kw)
+    expect(result.sourceOutput.get('ps2')).toBe(result.edgeStates.get('f2')?.kw)
+    expect(result.sourceOutput.get('ps1')).toBe(120)
+    expect(result.sourceOutput.get('ps2')).toBe(80)
+    expect(result.totalKw).toBe(200)
   })
 })
 
@@ -468,6 +604,31 @@ describe('checks and tie preview', () => {
     const result = GridSolver.solve(nodeModels, edgeModels)
     const checks = evaluateChecks(nodeModels, edgeModels, result)
     expect(checks.some((check) => check.code === 'OVERLOAD_SWITCH')).toBe(true)
+  })
+
+  it('does not flag parallel closed switches as overloaded by the whole section current', () => {
+    const nodes: unknown[] = [
+      sourceNode('ps', 100, 60),
+      busNode('bus', 300, 160),
+      { id: 'k1', type: 'switch', position: { x: 500, y: 260 }, data: { status: 'on', ratedCurrent: 250 } },
+      { id: 'k2', type: 'switch', position: { x: 700, y: 260 }, data: { status: 'on', ratedCurrent: 250 } },
+      loadNode('m1', 100, 'running', 500, 360),
+      loadNode('m2', 100, 'running', 700, 360),
+    ]
+    const edges: unknown[] = [
+      { id: 'e1', source: 'ps', target: 'bus', sourceHandle: 'bottom', targetHandle: 'top' },
+      { id: 'e2', source: 'bus', target: 'k1', sourceHandle: 'bottom', targetHandle: 'top' },
+      { id: 'e3', source: 'k1', target: 'm1', sourceHandle: 'bottom', targetHandle: 'top' },
+      { id: 'e4', source: 'bus', target: 'k2', sourceHandle: 'left', targetHandle: 'top' },
+      { id: 'e5', source: 'k2', target: 'm2', sourceHandle: 'bottom', targetHandle: 'top' },
+    ]
+    const { nodeModels, edgeModels } = buildGridModels(asNodes(nodes), asEdges(edges))
+    const result = GridSolver.solve(nodeModels, edgeModels)
+    // 整段 200kW 约 357A 超过额定 250A，但两台并联开关各带 100kW（约 179A），不应误报
+    expect(result.totalKw).toBe(200)
+    expect(result.sections[0].currentA).toBeGreaterThan(250)
+    const checks = evaluateChecks(nodeModels, edgeModels, result)
+    expect(checks.some((check) => check.code === 'OVERLOAD_SWITCH')).toBe(false)
   })
 
   it('previews a safe parallel close with load sharing', () => {

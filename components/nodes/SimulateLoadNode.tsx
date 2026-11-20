@@ -1,7 +1,8 @@
 import { memo } from 'react'
-import { Handle, Position, NodeProps } from 'reactflow'
+import { Handle, Position, type NodeProps } from '@xyflow/react'
+import type { GridNode } from '@/lib/grid'
 
-export const SimulateLoadNode = memo(({ data, id }: NodeProps) => {
+export const SimulateLoadNode = memo(({ data, id }: NodeProps<GridNode>) => {
   const portStatus = data.portStatus || {}
   // 统一按端口级判断：负载进线端口（top）是否带电；无端口状态时回退到节点级
   const topPowered = portStatus.top ?? Boolean(data.powered)

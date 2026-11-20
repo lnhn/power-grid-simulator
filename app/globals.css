@@ -2,9 +2,107 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
+:root,
+:root[data-skin="industrial"][data-mode="light"] {
+  --background: #f1f5f9;
+  --foreground: #0f172a;
+  --pg-bg: #f1f5f9;
+  --pg-surface: #ffffff;
+  --pg-border: #cbd5e1;
+  --pg-text: #0f172a;
+  --pg-muted: #64748b;
+  --pg-accent: #1d4ed8;
+  --pg-accent-soft: #dbeafe;
+  --pg-grid: #cbd5e1;
+  --pg-edge-idle: #94a3b8;
+  --pg-edge-active: #2563eb;
+  --pg-edge-conflict: #ef4444;
+  --pg-canvas-shadow: 0 1px 2px rgba(15,23,42,0.08);
+}
+
+:root[data-skin="industrial"][data-mode="dark"] {
+  --background: #0b1220;
+  --foreground: #e2e8f0;
+  --pg-bg: #0b1220;
+  --pg-surface: #111a2b;
+  --pg-border: #24334a;
+  --pg-text: #e2e8f0;
+  --pg-muted: #94a3b8;
+  --pg-accent: #38bdf8;
+  --pg-accent-soft: #0e3a52;
+  --pg-grid: #24334a;
+  --pg-edge-idle: #475569;
+  --pg-edge-active: #38bdf8;
+  --pg-edge-conflict: #f87171;
+  --pg-canvas-shadow: none;
+}
+
+:root[data-skin="schematic"][data-mode="light"] {
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #1c2b1c;
+  --pg-bg: #ffffff;
+  --pg-surface: #fbfdfb;
+  --pg-border: #cfe0cf;
+  --pg-text: #1c2b1c;
+  --pg-muted: #5f6f5f;
+  --pg-accent: #15803d;
+  --pg-accent-soft: #dcfce7;
+  --pg-grid: #dfeee0;
+  --pg-edge-idle: #9fb3a1;
+  --pg-edge-active: #15803d;
+  --pg-edge-conflict: #b91c1c;
+  --pg-canvas-shadow: none;
+}
+
+:root[data-skin="schematic"][data-mode="dark"] {
+  --background: #0f1411;
+  --foreground: #dceadc;
+  --pg-bg: #0f1411;
+  --pg-surface: #151d16;
+  --pg-border: #2b3a2d;
+  --pg-text: #dceadc;
+  --pg-muted: #93a894;
+  --pg-accent: #4ade80;
+  --pg-accent-soft: #12351f;
+  --pg-grid: #223124;
+  --pg-edge-idle: #4b5f4e;
+  --pg-edge-active: #4ade80;
+  --pg-edge-conflict: #f87171;
+  --pg-canvas-shadow: none;
+}
+
+:root[data-skin="paper"][data-mode="light"] {
+  --background: #faf6ec;
+  --foreground: #3f3a33;
+  --pg-bg: #faf6ec;
+  --pg-surface: #fffdf7;
+  --pg-border: #e2d9c3;
+  --pg-text: #3f3a33;
+  --pg-muted: #8b8172;
+  --pg-accent: #b45309;
+  --pg-accent-soft: #fde68a;
+  --pg-grid: #e7dbc2;
+  --pg-edge-idle: #b9ac94;
+  --pg-edge-active: #b45309;
+  --pg-edge-conflict: #b91c1c;
+  --pg-canvas-shadow: 0 1px 2px rgba(63,58,51,0.08);
+}
+
+:root[data-skin="paper"][data-mode="dark"] {
+  --background: #1c1917;
+  --foreground: #ece5da;
+  --pg-bg: #1c1917;
+  --pg-surface: #26211d;
+  --pg-border: #3f3831;
+  --pg-text: #ece5da;
+  --pg-muted: #b0a291;
+  --pg-accent: #f59e0b;
+  --pg-accent-soft: #43290a;
+  --pg-grid: #332d27;
+  --pg-edge-idle: #6b6157;
+  --pg-edge-active: #f59e0b;
+  --pg-edge-conflict: #f87171;
+  --pg-canvas-shadow: none;
 }
 
 body {
@@ -53,7 +151,6 @@ body {
 .react-flow__node.selected {
   outline: 2px solid #2563eb;
   outline-offset: 2px;
-  transform: scale(1.02);
   box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.15);
   z-index: 5;
 }

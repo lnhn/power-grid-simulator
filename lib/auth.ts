@@ -49,6 +49,7 @@ export const authOptions: NextAuthOptions = {
           id: user.id,
           name: user.username,
           role: user.role,
+          tenantId: user.tenantId,
         }
       }
     })
@@ -57,12 +58,29 @@ export const authOptions: NextAuthOptions = {
     async jwt({ token, user }) {
       if (user) {
         token.role = user.role
+        token.tenantId = user.tenantId
+        return token
+      }
+
+      // 每次请求回查数据库，使角色调整/账号删除能即时生效，避免 JWT 长期固化权限。
+      if (token.sub) {
+        const dbUser = await prisma.user.findUnique({
+          where: { id: token.sub },
+          select: { role: true, tenantId: true },
+        })
+        if (!dbUser) {
+          token.role = 'REVOKED'
+          return token
+        }
+        token.role = dbUser.role
+        token.tenantId = dbUser.tenantId
       }
       return token
     },
     async session({ session, token }) {
       if (session?.user) {
         session.user.role = token.role as string
+        session.user.tenantId = (token.tenantId as string) ?? 'default'
         session.user.id = token.sub as string
       }
       return session
@@ -73,5 +91,6 @@ export const authOptions: NextAuthOptions = {
   },
   session: {
     strategy: 'jwt',
+    maxAge: 8 * 60 * 60,
   },
 }

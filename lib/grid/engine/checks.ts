@@ -82,17 +82,46 @@ export function evaluateChecks(nodes: NodeModel[], edges: EdgeModel[], result: G
     })
   }
 
+  // 开关过载：优先按该开关所在边实际流过的电流判断（潮流口径）；边上没有负荷潮流时，
+  // 再按本段闭合开关数量分摊段电流并注明为近似。
+  // 不变量：单台闭合开关带负荷时电流取自其馈线边，超限仍能报警；多台并联开关各带本支路电流，
+  // 不再用整段电流逐台比较，避免全部误报。
+  const closedSwitchCountBySection = new Map<string, number>()
   nodes
-    .filter((node) => node.type === 'switch' && typeof node.data.ratedCurrent === 'number')
+    .filter((node) => node.type === 'switch' && node.data.closed === true)
     .forEach((node) => {
-      const section = result.sections.find((item) => item.id === result.nodeSection.get(node.id))
-      if (!section || section.currentA <= 0) return
+      const sectionId = result.nodeSection.get(node.id)
+      if (sectionId) closedSwitchCountBySection.set(sectionId, (closedSwitchCountBySection.get(sectionId) ?? 0) + 1)
+    })
+
+  nodes
+    .filter((node) => node.type === 'switch' && node.data.closed === true && typeof node.data.ratedCurrent === 'number')
+    .forEach((node) => {
       const rated = node.data.ratedCurrent as number
-      if (section.currentA > rated) {
+      const terminals = new Set([`${node.id}:top`, `${node.id}:bottom`, `${node.id}:left`, `${node.id}:right`])
+      let branchAmp = 0
+      edges.forEach((edge) => {
+        if (!terminals.has(edge.sourcePortId) && !terminals.has(edge.targetPortId)) return
+        const amp = result.edgeStates.get(edge.id)?.amp
+        if (amp !== null && amp !== undefined && amp > branchAmp) branchAmp = amp
+      })
+
+      let current = branchAmp
+      let approximation = ''
+      if (current <= 0) {
+        // 近似：开关所在边不带负荷潮流（如末端备用开关）时，按本段闭合开关数分摊段电流
+        const section = result.sections.find((item) => item.id === result.nodeSection.get(node.id))
+        if (!section || section.currentA <= 0) return
+        const closedCount = closedSwitchCountBySection.get(section.id) ?? 1
+        current = section.currentA / closedCount
+        approximation = `（按本段 ${closedCount} 台闭合开关平均分摊，近似）`
+      }
+
+      if (current > rated) {
         checks.push({
           code: 'OVERLOAD_SWITCH',
           severity: 'danger',
-          message: `「${node.data.label ?? node.id}」额定 ${rated}A，所在分段负荷电流 ${Math.round(section.currentA)}A`,
+          message: `「${node.data.label ?? node.id}」额定 ${rated}A，流过电流 ${Math.round(current)}A${approximation}`,
           nodeIds: [node.id],
           edgeIds: [],
         })

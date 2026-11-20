@@ -1,5 +1,47 @@
 # 更新日志
 
+## v2.6.0 - Next.js 16 安全升级
+
+清理上一轮审计残留的唯一 critical 依赖告警，完成框架 major 升级与回归验证。
+
+### 依赖与安全
+- Next.js 14.2.35 → 16.4.6，`npm audit` 从 1 critical / 12 其他告警降为 **0 漏洞**
+- next-auth 4.24.15 保持（已声明支持 Next 16），会话与租户校验回归通过
+- ESLint 8 / `next lint` → ESLint 9 Flat Config + CLI（`eslint .`），保留 Hooks 核心规则
+
+### 破坏性变更适配
+- 所有 Route Handler 的 `params` 改为 `Promise` 并 `await`；两个客户端页面改用 `useParams()`
+- 启用 Turbopack 默认构建，`tsconfig.json` 自动补齐 `jsx: react-jsx` 与生成的类型路径
+- 修正 React Compiler 新增规则误报：渲染期不再直接写入 ref，右键菜单改为直接条件渲染
+
+### 回归验证
+- `npx tsc --noEmit`、`npm run lint`（0 error）、`npm test`（39/39）、`npm run build` 全部通过
+- 生产服务冒烟：登录/会话、电网 CRUD 读、日志读取、动态页面均正常；跨租户访问电网/日志/设备接口仍返回 404
+
+> 已知遗留：Next 16 标记 React 18 为弃用（Next 17 将移除）；ReactFlow 11 迁移到 React 19 生态需单独安排。
+
+## v2.5.0 - 租户隔离与工程门禁
+
+本轮以依赖安全升级为契机，恢复工程门禁并补齐多租户与引擎正确性。
+
+### 工程与依赖
+- 恢复 ESLint，`npm run lint` 重新纳入工程门禁；构建在依赖升级后验证通过
+- 依赖安全升级：Next.js 14.2.35、next-auth 4.24.15+、Vitest 5
+
+### 多租户隔离
+- `User` / `PowerGrid` 增加 `tenantId`，电网与账号归属租户
+- 电网 CRUD、设备清单与操作日志 API 按当前会话 `tenantId` 过滤，跨租户不暴露资源
+- OPERATOR 只能查看并模拟被授权租户内的电网，不能跨租户操作
+
+### 引擎与正确性
+- 修复功率守恒问题，功率汇总与进线总功率口径一致
+- 修复引擎边界：运行态与设计态进一步分离，`/state` 路由保留但禁止写回运行态
+
+### 功能与文档
+- 新增草稿预览，模拟前可预演操作结果
+- 皮肤体系收尾（三套皮肤 × 明暗，设置页切换）
+- README / CHANGELOG / ROADMAP / USAGE 同步到 v2.5.0 现状
+
 ## v2.3 - 语义与工程化整理
 
 本次把停留在 v1.0.1 的文档追平代码，并固化此前的重构。

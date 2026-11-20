@@ -2,21 +2,20 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions, requireRole } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { getScopedGrid } from '@/lib/tenant'
 
 /** 获取该电网的设备清单（保存电网时已自动同步） */
 export async function GET(
   _request: Request,
-  { params }: { params: { id: string } }
+  { params: paramsPromise }: { params: Promise<{ id: string }> }
 ) {
+  const params = await paramsPromise
   try {
     const session = await getServerSession(authOptions)
     const denied = requireRole(session, ['ENGINEER', 'OPERATOR'])
     if (denied) return denied
 
-    const grid = await prisma.powerGrid.findUnique({
-      where: { id: params.id },
-      select: { id: true, name: true, description: true },
-    })
+    const grid = await getScopedGrid(session, params.id)
     if (!grid) {
       return NextResponse.json({ error: 'Grid not found' }, { status: 404 })
     }
