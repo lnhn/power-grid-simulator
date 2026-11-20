@@ -34,6 +34,7 @@ model PowerGrid {
   updatedAt   DateTime   @updatedAt
   logs        OperationLog[]
   equipment   Equipment[] // 设备清单：保存电网时自动从节点同步
+  events      GridEvent[] // 运行事件：告警产生/消失时留痕
 
   @@index([tenantId])
 }
@@ -68,4 +69,22 @@ model Equipment {
   specs       String?   // JSON 扩展属性
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+}
+
+// 运行事件：由前端解算出的校验清单差异驱动，只记"产生/消失"，不重复刷屏
+model GridEvent {
+  id        String    @id @default(cuid())
+  gridId    String
+  grid      PowerGrid @relation(fields: [gridId], references: [id], onDelete: Cascade)
+  tenantId  String    @default("default")
+  at        DateTime  @default(now())
+  severity  String    // danger | warning | info
+  code      String    // VOLTAGE_CONFLICT / TIE_UNSAFE_PARALLEL / OVERLOAD_SWITCH / SECTION_DEENERGIZED / LOOP_PATH
+  message   String
+  targetId  String?   // 相关元件，多为母联或开关
+  state     String    // raised | cleared
+  snapshot  String?   // 触发时的分段/功率摘要 JSON
+
+  @@index([gridId, at])
+  @@index([tenantId, at])
 }

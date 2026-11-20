@@ -23,7 +23,7 @@ import { Toast } from '@/components/Toast'
 import { ConfirmModal } from '@/components/ConfirmModal'
 import { buildGridModels, GridSolver, voltageToColor, inferTieHandle, normalizeTieHandle, buildNodeRuntime } from '@/lib/grid'
 import type { SectionState, TieState, GridNode, GridEdge } from '@/lib/grid'
-import { evaluateChecks, previewTieToggle } from '@/lib/grid'
+import { diffChecks, evaluateChecks, previewTieToggle } from '@/lib/grid'
 import type { GridCheck } from '@/lib/grid'
 import { useSkin } from '@/components/SkinProvider'
 
@@ -52,6 +52,17 @@ interface GridData {
   edges: string
 }
 
+
+/** 运行事件（/api/grids/[id]/events 的返回形状） */
+interface GridEventRow {
+  id: string
+  at: string
+  severity: string
+  code: string
+  message: string
+  targetId: string | null
+  state: string
+}
 interface OperationLog {
   id: string
   timestamp: string
@@ -85,6 +96,14 @@ export default function SimulateGridPage() {
     onConfirm: () => void
   }>({ open: false, title: '', message: '', onConfirm: () => {} })
   const [summary, setSummary] = useState<{ sections: SectionState[]; ties: TieState[]; totalKw: number; checks: GridCheck[] } | null>(null)
+  const [events, setEvents] = useState<GridEventRow[]>([])
+  // 故障注入：仅内存生效，不改数据库；恢复即清除
+  const [faultedSources, setFaultedSources] = useState<string[]>([])
+  // 总负荷采样（前端内存环形缓冲，5 秒一点，最多 60 点）
+  const [trend, setTrend] = useState<{ t: number; kw: number }[]>([])
+  const lastChecksRef = useRef<GridCheck[] | null>(null)
+  const faultedSourcesRef = useRef<string[]>([])
+  const latestKwRef = useRef<number>(0)
   const nodesRef = useRef<Node[]>([])
   const edgesRef = useRef<Edge[]>([])
 
@@ -112,6 +131,7 @@ export default function SimulateGridPage() {
   useEffect(() => {
     if (status === 'loading' || status === 'unauthenticated') return
     fetchGrid()
+    fetchEvents()
     // 只在电网 id / 会话状态变化时加载，避免 showLogs 变化覆盖模拟中的本地状态
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gridId, status])
@@ -232,6 +252,25 @@ export default function SimulateGridPage() {
   }
 
   /** 母联操作预演：返回将发生的结果，供确认弹窗展示 */
+  // 总负荷采样：5 秒一点，无操作时也能看出趋势；纯前端内存，不落库
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTrend((prev) => [...prev.slice(-59), { t: Date.now(), kw: latestKwRef.current }])
+    }, 5000)
+    return () => clearInterval(timer)
+  }, [])
+
+  const fetchEvents = async () => {
+    try {
+      const res = await fetch(`/api/grids/${gridId}/events?limit=50`)
+      if (!res.ok) return
+      const data = await res.json()
+      setEvents(Array.isArray(data.events) ? data.events : [])
+    } catch (error) {
+      console.error('Fetch events failed:', error)
+    }
+  }
+
   const buildPreview = (nodeId: string, close: boolean) => {
     const { nodeModels, edgeModels } = buildGridModels(nodesRef.current, edgesRef.current)
     const preview = previewTieToggle(nodeModels, edgeModels, nodeId, close)
@@ -334,7 +373,16 @@ export default function SimulateGridPage() {
 
   /** 求解并把运行态叠加到视图上：节点 design 字段保持原值，只写运行态字段 */
   const applyCircuitState = (currentNodes: Node[], currentEdges: Edge[]) => {
-    const { nodeModels, edgeModels } = buildGridModels(currentNodes, currentEdges)
+    // 故障注入：把被注入的电源在内存里置为停运，求解结果随之变化，但设计数据不动
+    const faults = faultedSourcesRef.current
+    const liveNodes = faults.length === 0
+      ? currentNodes
+      : currentNodes.map((node) =>
+          faults.includes(node.id)
+            ? { ...node, data: { ...node.data, status: 'off' } }
+            : node
+        )
+    const { nodeModels, edgeModels } = buildGridModels(liveNodes as Node[], currentEdges)
     const result = GridSolver.solve(nodeModels, edgeModels)
     const checks = evaluateChecks(nodeModels, edgeModels, result)
     const runtime = buildNodeRuntime(nodeModels, result)
@@ -402,7 +450,36 @@ export default function SimulateGridPage() {
     setEdges(solvedEdges)
     setSummary({ sections: result.sections, ties: Array.from(result.ties.values()), totalKw: result.totalKw, checks })
 
+    // 首次求解只作为基线，不把"开机就存在的既有问题"刷成一堆事件
+    const previousChecks = lastChecksRef.current
+    const changed = previousChecks ? diffChecks(previousChecks, checks, JSON.stringify({ totalKw: Math.round(result.totalKw), sections: result.sections.length })) : []
+    lastChecksRef.current = checks
+    if (changed.length > 0 && !isDraftPreview()) {
+      fetch(`/api/grids/${gridId}/events`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ events: changed }),
+      })
+        .then(() => fetchEvents())
+        .catch((error) => console.error('Post grid events failed:', error))
+    }
+    latestKwRef.current = result.totalKw
+    setTrend((prev) => [...prev.slice(-59), { t: Date.now(), kw: result.totalKw }])
+
     return { nextNodes: solvedNodes, nextEdges: solvedEdges }
+  }
+
+  /** 故障注入：只改内存中的运行状态并重解，不写数据库 */
+  const toggleFault = (nodeId: string) => {
+    const injected = faultedSourcesRef.current.includes(nodeId)
+    const next = injected
+      ? faultedSourcesRef.current.filter((id) => id !== nodeId)
+      : [...faultedSourcesRef.current, nodeId]
+    faultedSourcesRef.current = next
+    setFaultedSources(next)
+    const label = nodesRef.current.find((node) => node.id === nodeId)?.data?.label ?? nodeId
+    applyCircuitState(nodesRef.current, edgesRef.current)
+    setToast({ message: injected ? label + ': 已恢复供电' : label + ': 已注入失电故障', type: 'success' })
   }
 
   if (status === 'loading' || loading) {
@@ -421,6 +498,15 @@ export default function SimulateGridPage() {
   const closedSwitchCount = nodes.filter(n => n.type === 'switch' && n.data.status === 'on').length
   const loadCount = nodes.filter(n => n.type === 'load').length
   const runningLoadCount = nodes.filter(n => n.type === 'load' && n.data.status === 'running' && n.data.powered).length
+
+  const trendMax = Math.max(...trend.map((point) => point.kw), 1)
+  const trendPoints = trend
+    .map((point, index) => {
+      const x = Math.round((index / Math.max(trend.length - 1, 1)) * 160)
+      const y = Math.round(38 - (point.kw / trendMax) * 34)
+      return x + ',' + y
+    })
+    .join(' ')
 
   const TIE_MODE_LABEL: Record<string, { text: string; cls: string }> = {
     sectioned: { text: '分段运行', cls: 'bg-emerald-100 text-emerald-700' },
@@ -560,6 +646,75 @@ export default function SimulateGridPage() {
                 </div>
               </div>
             )}
+
+            {summary && (
+              <div className="mt-6 pt-6 border-t border-gray-200">
+                <h3 className="text-sm font-bold text-gray-800 mb-1">总负荷趋势</h3>
+                {trend.length < 2 ? (
+                  <p className="text-[11px] text-gray-500">采样中，每 5 秒记录一点</p>
+                ) : (
+                  <svg viewBox="0 0 160 40" className="w-full h-14" preserveAspectRatio="none">
+                    <polyline points={trendPoints} fill="none" stroke="#2563eb" strokeWidth="1.5" />
+                  </svg>
+                )}
+                <div className="flex items-center justify-between text-[11px] text-gray-500 mt-1">
+                  <span>最近 {trend.length} 点</span>
+                  <span>峰值 {trendMax.toFixed(0)} kW</span>
+                </div>
+              </div>
+            )}
+
+            <div className="mt-6 pt-6 border-t border-gray-200">
+              <h3 className="text-sm font-bold text-gray-800 mb-1">故障注入</h3>
+              <p className="text-[11px] text-gray-500 mb-2">仅影响当前画面，不写数据库。</p>
+              <div className="space-y-2">
+                {nodes.filter((node) => node.type === 'powerSource').map((node) => {
+                  const injected = faultedSources.includes(node.id)
+                  return (
+                    <button
+                      key={node.id}
+                      onClick={() => toggleFault(node.id)}
+                      className={"w-full flex items-center justify-between rounded-lg border px-3 py-2 text-[11px] " + (injected ? "border-red-300 bg-red-50 text-red-700" : "border-gray-200 bg-white text-gray-700")}
+                    >
+                      <span className="truncate">{node.data?.label ?? node.id}</span>
+                      <span className="font-semibold ml-2">{injected ? '恢复供电' : '注入失电'}</span>
+                    </button>
+                  )
+                })}
+                {nodes.filter((node) => node.type === 'powerSource').length === 0 && (
+                  <p className="text-xs text-gray-500">画布上没有电源</p>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-6 pt-6 border-t border-gray-200">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-bold text-gray-800">运行事件</h3>
+                <button onClick={fetchEvents} className="text-[11px] text-blue-600 hover:text-blue-800">刷新</button>
+              </div>
+              {events.length === 0 ? (
+                <p className="text-xs text-gray-500">暂无事件。问题产生与消失都会在这里留痕。</p>
+              ) : (
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {events.map((event) => {
+                    const cls = event.state === 'cleared'
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      : event.severity === 'danger'
+                        ? 'border-red-200 bg-red-50 text-red-700'
+                        : 'border-amber-200 bg-amber-50 text-amber-700'
+                    return (
+                      <div key={event.id} className={'rounded-lg border px-3 py-2 text-[11px] ' + cls}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-semibold">{event.state === 'cleared' ? '恢复' : '告警'}</span>
+                          <span className="opacity-70">{new Date(event.at).toLocaleTimeString('zh-CN')}</span>
+                        </div>
+                        <p className="leading-relaxed">{event.message}</p>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
 
             {summary && (
               <div className="mt-6 pt-6 border-t border-gray-200">
