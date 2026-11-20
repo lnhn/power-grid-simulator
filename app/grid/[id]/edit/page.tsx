@@ -43,9 +43,6 @@ const EDGE_EPSILON = 1
 const EDGE_ALIGN_TOLERANCE = 4
 const EDGE_SHORT_SEGMENT_MIN = 8
 
-// 编辑页与预览页共享的草稿键（sessionStorage，仅当前标签页有效）
-const PREVIEW_DRAFT_KEY = 'pg-preview-draft'
-
 /** 数值输入解析：0 保持为 0；空串写 0；非数字才回退默认值，避免 `|| 默认值` 吞掉 0 */
 const toNumberInput = (raw: string, fallback: number): number => {
   const trimmed = raw.trim()
@@ -204,8 +201,8 @@ function UpdatableEdge({
         markerEnd={markerEnd}
         style={{
           ...style,
-          strokeWidth: selected ? 3 : 2,
-          stroke: selected ? '#3b82f6' : '#64748b',
+          strokeWidth: selected ? 3 : (style?.strokeWidth as number) ?? 2,
+          stroke: selected ? '#3b82f6' : (style?.stroke as string) ?? '#64748b',
         }}
       />
       {(selected || isActive) && (
@@ -268,6 +265,7 @@ import { LoadNode } from '@/components/nodes/LoadNode'
 import { BusNode } from '@/components/nodes/BusNode'
 import { TransformerNode } from '@/components/nodes/TransformerNode'
 import { useSkin } from '@/components/SkinProvider'
+import { buildNodeRuntime, type NodeRuntimeView, type GridSolveResult } from '@/lib/grid'
 import { buildGridModels, GridSolver, NodeModel, inferSide, inferTieHandle, normalizeNodeData, normalizeTieHandle, lintTopology, autoLayout, toPersistedNodes, toPersistedEdges, type GridNode, type GridEdge } from '@/lib/grid'
 import { Toast } from '@/components/Toast'
 
@@ -298,7 +296,6 @@ export default function EditGridPage() {
   const [validationCollapsed, setValidationCollapsed] = useState(false)
   const [showUnpowered, setShowUnpowered] = useState(true)
   const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null)
-  const [previewDrawerOpen, setPreviewDrawerOpen] = useState(false)
   const [contextMenu, setContextMenu] = useState<{
     open: boolean
     x: number
@@ -325,25 +322,6 @@ export default function EditGridPage() {
     edgesRef.current = edges
   }, [edges])
 
-  /** 打开模拟预览：把当前未保存画布写入草稿，供 iframe 内的预览页读取 */
-  const openPreview = () => {
-    try {
-      sessionStorage.setItem(PREVIEW_DRAFT_KEY, JSON.stringify({ nodes, edges }))
-    } catch (e) {
-      console.error('Failed to save preview draft:', e)
-    }
-    setPreviewDrawerOpen(true)
-  }
-
-  /** 关闭模拟预览：清除草稿，避免残留影响下次打开 */
-  const closePreview = () => {
-    try {
-      sessionStorage.removeItem(PREVIEW_DRAFT_KEY)
-    } catch (e) {
-      console.error('Failed to clear preview draft:', e)
-    }
-    setPreviewDrawerOpen(false)
-  }
 
   const pushHistory = useCallback((nextNodes: Node[], nextEdges: Edge[]) => {
     if (isRestoringRef.current) return
@@ -790,6 +768,8 @@ export default function EditGridPage() {
     })
 
     const result = GridSolver.solve(nodeModels, edgeModels)
+    // 同一份求解结果既喂校验清单，也喂画布上的运行态叠加，避免算两遍
+    lastSolveRef.current = { result, runtime: buildNodeRuntime(nodeModels, result) }
 
     nodes.forEach((node) => {
       if (node.type === 'powerSource') return
@@ -806,9 +786,16 @@ export default function EditGridPage() {
   }, [nodes, edges, toNodeModel, showUnpowered])
 
   const [validation, setValidation] = useState<{ id: string; message: string; severity?: 'danger' | 'warning' | 'info' }[]>([])
+  /** 运行态叠加：打开后把求解结果贴到画布上（只读，不写回设计数据） */
+  const [liveMode, setLiveMode] = useState(false)
+  const [snapshot, setSnapshot] = useState<{ result: GridSolveResult; runtime: Map<string, NodeRuntimeView> } | null>(null)
+  const lastSolveRef = useRef<{ result: GridSolveResult; runtime: Map<string, NodeRuntimeView> } | null>(null)
 
   useEffect(() => {
-    const timer = setTimeout(() => setValidation(computeValidation()), 250)
+    const timer = setTimeout(() => {
+      setValidation(computeValidation())
+      setSnapshot(lastSolveRef.current)
+    }, 250)
     return () => clearTimeout(timer)
   }, [computeValidation])
 
@@ -1295,6 +1282,44 @@ export default function EditGridPage() {
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [deleteSelectedElements, handleUndo, handleRedo, handleCopy, handleCut, handlePaste])
 
+  // 运行态下的节点：把运行视图挂到 data.live，节点卡片自己决定描边与角标
+  const nodesForCanvas = useMemo(() => {
+    if (!liveMode || !snapshot) return nodesWithHandlers
+    return nodesWithHandlers.map((node) => ({
+      ...node,
+      data: { ...node.data, live: snapshot.runtime.get(node.id) ?? { powered: false, voltage: 0 } },
+    }))
+  }, [liveMode, snapshot, nodesWithHandlers])
+
+  // 运行态下的连线：带电走实线绿，失电走灰虚线；环网并联另标
+  const edgesForCanvas = useMemo(() => {
+    if (!liveMode || !snapshot) return edges
+    return edges.map((edge) => {
+      const state = snapshot.result.edgeStates.get(edge.id)
+      const active = state?.active ?? false
+      return {
+        ...edge,
+        animated: active,
+        style: {
+          ...edge.style,
+          stroke: state?.conflict ? '#dc2626' : active ? '#16a34a' : '#94a3b8',
+          strokeWidth: active ? 2.5 : 1.5,
+          strokeDasharray: active ? undefined : '6 4',
+          opacity: active ? 1 : 0.7,
+        },
+      }
+    })
+  }, [liveMode, snapshot, edges])
+
+  // 母联方式摘要（并列 / 分段 / 备用）
+  const tieSummary = useMemo(() => {
+    if (!snapshot) return ''
+    const list = Array.from(snapshot.result.ties.values())
+    if (list.length === 0) return '无母联'
+    const label: Record<string, string> = { parallel: '并列', unsafeParallel: '危险并列', sectioned: '分段', standby: '备用' }
+    return list.map((tie) => label[tie.mode] ?? tie.mode).join(' / ')
+  }, [snapshot])
+
   if (status === 'loading' || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center pg-surface">
@@ -1380,13 +1405,20 @@ export default function EditGridPage() {
               <span>{saving ? '保存中...' : '保存'}</span>
             </button>
             <button
-              onClick={openPreview}
-              className="flex items-center space-x-2 px-4 py-2 rounded-lg transition shadow-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+              onClick={() => setLiveMode((prev) => !prev)}
+              className="flex items-center space-x-2 px-4 py-2 rounded-lg transition shadow-md"
+              style={
+                liveMode
+                  ? { background: '#16a34a', color: '#ffffff' }
+                  : { background: 'var(--pg-panel-muted)', color: 'var(--pg-text)', border: '1px solid var(--pg-panel-border)' }
+              }
+              title="把求解结果直接叠到画布上：带电绿、失电灰、冲突红"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553 2.276a1 1 0 010 1.789L15 16M4 6h7a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V8a2 2 0 012-2z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                <circle cx="12" cy="12" r="3" />
               </svg>
-              <span>预览</span>
+              <span>{liveMode ? '退出运行态' : '运行态'}</span>
             </button>
           </div>
         </div>
@@ -1680,10 +1712,10 @@ export default function EditGridPage() {
         </div>
 
         {/* 右侧画布 */}
-        <div className="flex-1" ref={reactFlowWrapper}>
+        <div className="flex-1 relative" ref={reactFlowWrapper}>
           <ReactFlow
-            nodes={nodesWithHandlers}
-            edges={edges}
+            nodes={nodesForCanvas}
+            edges={edgesForCanvas}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
@@ -1716,8 +1748,8 @@ export default function EditGridPage() {
             snapToGrid={true}
             snapGrid={[15, 15]}
             // 启用选择功能
-            nodesDraggable={true}
-            nodesConnectable={true}
+            nodesDraggable={!liveMode}
+            nodesConnectable={!liveMode}
             elementsSelectable={true}
             // 启用多选
             selectNodesOnDrag={true}
@@ -1746,6 +1778,22 @@ export default function EditGridPage() {
               maskColor={mode === 'dark' ? 'rgba(11,18,32,0.55)' : 'rgba(241,245,249,0.55)'}
             />
           </ReactFlow>
+
+          {liveMode && snapshot && (
+            <div
+              className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 px-4 py-2 rounded-full shadow-lg text-xs"
+              style={{ background: 'var(--pg-panel)', border: '1px solid var(--pg-panel-border)', color: 'var(--pg-text)' }}
+            >
+              <span className="flex items-center gap-1.5 font-semibold" style={{ color: '#16a34a' }}>
+                <span className="w-2 h-2 rounded-full" style={{ background: '#16a34a' }} />
+                运行态
+              </span>
+              <span className="pg-muted">总负荷 {Math.round(snapshot.result.totalKw)} kW</span>
+              <span className="pg-muted">分段 {snapshot.result.sections.length}</span>
+              <span className="pg-muted">母联 {tieSummary}</span>
+              <span className="pg-muted">绿色流动=带电 · 灰色虚线=失电</span>
+            </div>
+          )}
         </div>
 
         {/* 右侧属性面板：选中单个节点时显示 */}
@@ -2085,33 +2133,6 @@ export default function EditGridPage() {
         </div>
       )}
 
-      {previewDrawerOpen && (
-        <div className="fixed inset-0 z-50">
-          <div
-            className="absolute inset-0 bg-black/40"
-            onClick={closePreview}
-          />
-          <div className="absolute right-0 top-0 h-full w-[80vw] min-w-[420px] pg-panel shadow-2xl flex flex-col">
-            <div className="flex items-center justify-between px-4 py-3 border-b pg-border">
-              <div className="text-sm font-semibold pg-text">模拟预览</div>
-              <button
-                onClick={closePreview}
-                className="p-2 rounded-lg hover:bg-[var(--pg-surface)] transition"
-                aria-label="关闭预览"
-              >
-                <svg className="w-4 h-4 pg-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <iframe
-              title="模拟预览"
-              src={`/grid/${gridId}/simulate?draft=1`}
-              className="flex-1 w-full border-0"
-            />
-          </div>
-        </div>
-      )}
     </div>
   )
 }

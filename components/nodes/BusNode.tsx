@@ -5,22 +5,27 @@ import { Handle, Position, type NodeProps } from '@xyflow/react'
 import type { GridNode } from '@/lib/grid'
 import { useSkin } from '@/components/SkinProvider'
 import { SymbolIcon } from './SymbolIcon'
+import { LiveBadge, liveBorderColor, type LiveView } from './LiveBadge'
 
 /** 母线：一块横条，皮肤决定面板质感，符号集决定母排画法 */
 export const BusNode = memo(({ data, selected }: NodeProps<GridNode>) => {
   const { tokens, skin } = useSkin()
+  // 运行态叠加：只在"运行态"开关打开时存在，不改设计数据
+  const live = (data as unknown as { live?: LiveView }).live
+  const liveBorder = liveBorderColor(live)
 
   return (
     <div
       className="relative px-5 py-3 min-w-[240px] border-2 transition-shadow"
       style={{
         background: 'var(--pg-panel)',
-        borderColor: selected ? tokens.accent : 'var(--pg-panel-border)',
+        borderColor: liveBorder ?? (selected ? tokens.accent : 'var(--pg-panel-border)'),
         borderRadius: 'var(--pg-radius)',
         boxShadow: selected ? `0 0 0 3px ${tokens.accentSoft}` : tokens.canvasShadow,
         fontFamily: 'var(--pg-font)',
       }}
     >
+      {live && <LiveBadge live={live} kind={'bus'} />}
       {selected && (
         <button
           type="button"

@@ -2,9 +2,13 @@ import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import type { GridNode } from '@/lib/grid'
 import { useSkin } from '@/components/SkinProvider'
+import { LiveBadge, liveBorderColor, type LiveView } from './LiveBadge'
 
 export const LoadNode = memo(({ data, selected }: NodeProps<GridNode>) => {
   const { tokens } = useSkin()
+  // 运行态叠加：只在"运行态"开关打开时存在，不改设计数据
+  const live = (data as unknown as { live?: LiveView }).live
+  const liveBorder = liveBorderColor(live)
   const getLoadIcon = () => {
     const iconClass = 'w-5 h-5'
     const common = {
@@ -115,12 +119,13 @@ export const LoadNode = memo(({ data, selected }: NodeProps<GridNode>) => {
       className="relative px-5 py-3 min-w-[240px] border-2"
       style={{
         background: 'var(--pg-panel)',
-        borderColor: selected ? tokens.accent : 'var(--pg-panel-border)',
+        borderColor: liveBorder ?? (selected ? tokens.accent : 'var(--pg-panel-border)'),
         borderRadius: 'var(--pg-radius)',
         boxShadow: selected ? `0 0 0 3px ${tokens.accentSoft}` : tokens.canvasShadow,
         fontFamily: 'var(--pg-font)',
       }}
     >
+      {live && <LiveBadge live={live} kind={'load'} />}
       {selected && (
         <button
           type="button"
