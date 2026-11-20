@@ -44,3 +44,4 @@ next-env.d.ts
 
 # 工具临时目录
 .workbuddy/
+prisma/*.bak*

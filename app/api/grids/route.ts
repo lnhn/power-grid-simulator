@@ -1,3 +1,4 @@
+import { TEMPLATE_LIST, buildTemplate, type GridTemplateId } from '@/lib/grid'
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions, requireRole } from '@/lib/auth'
@@ -29,7 +30,7 @@ export async function POST(request: Request) {
     const denied = requireRole(session, ['ENGINEER'])
     if (denied) return denied
 
-    const { name, description } = await request.json()
+    const { name, description, template } = await request.json()
 
     if (!name || typeof name !== 'string' || name.trim() === '') {
       return NextResponse.json({ error: '电网名称不能为空' }, { status: 400 })
@@ -38,14 +39,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: '电网描述格式不正确' }, { status: 400 })
     }
 
-    // 创建初始空电网，并绑定当前租户
+    // 拓扑模板：只接受白名单 id，防注入任意 JSON
+    const templateId: GridTemplateId =
+      typeof template === 'string' && TEMPLATE_LIST.some((item) => item.id === template)
+        ? (template as GridTemplateId)
+        : 'blank'
+    const built = buildTemplate(templateId)
+
     const grid = await prisma.powerGrid.create({
       data: {
         tenantId: tenantIdOf(session),
         name: name.trim(),
         description: description?.trim() || null,
-        nodes: JSON.stringify([]),
-        edges: JSON.stringify([]),
+        nodes: JSON.stringify(built.nodes),
+        edges: JSON.stringify(built.edges),
       },
     })
 

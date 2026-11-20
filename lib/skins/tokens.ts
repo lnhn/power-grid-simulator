@@ -1,10 +1,14 @@
 /**
  * 皮肤只控制"表面层"：背景、网格、面板、连线、字体与圆角。
  * 元件本体的语义色（带电/失电/冲突）不随皮肤改变——换皮肤不改变美学，也不改变含义。
+ *
+ * 元件符号集（IEC / 国标 / 简化）是独立维度，见 SYMBOL_LIST：形状影响"怎么画"，
+ * 语义色影响"是什么意思"，两者可以自由组合。
  */
 
 export type SkinId = 'industrial' | 'schematic' | 'paper'
 export type SkinMode = 'light' | 'dark'
+export type SymbolSet = 'iec' | 'gb' | 'simple'
 
 export type SkinTokens = {
   bg: string
@@ -19,7 +23,16 @@ export type SkinTokens = {
   edgeActive: string
   edgeConflict: string
   canvasShadow: string
+  /** 面板卡片：侧栏、弹窗、检查清单的底色与描边 */
+  panel: string
+  panelBorder: string
+  panelMuted: string
+  /** 元件卡片的圆角与字体，统一由皮肤决定 */
+  radius: string
+  fontFamily: string
 }
+
+type Palette = Omit<SkinTokens, 'panel' | 'panelBorder' | 'panelMuted' | 'radius' | 'fontFamily'>
 
 export type SkinMeta = { id: SkinId; name: string; description: string }
 
@@ -29,7 +42,15 @@ export const SKIN_LIST: SkinMeta[] = [
   { id: 'paper', name: '纸感', description: '暖白纸面、赭色强调，适合打印与交底' },
 ]
 
-const PALETTES: Record<SkinId, Record<SkinMode, SkinTokens>> = {
+export type SymbolMeta = { id: SymbolSet; name: string; description: string }
+
+export const SYMBOL_LIST: SymbolMeta[] = [
+  { id: 'iec', name: 'IEC 符号', description: '母排为粗线、开关为刀开关、变压器为双圆' },
+  { id: 'gb', name: '国标符号', description: '矩形母排、方形断路器、双矩形变压器' },
+  { id: 'simple', name: '简化符号', description: '只保留通断状态，适合手机与投屏' },
+]
+
+const PALETTES: Record<SkinId, Record<SkinMode, Palette>> = {
   industrial: {
     light: {
       bg: '#f1f5f9', surface: '#ffffff', border: '#cbd5e1', text: '#0f172a', muted: '#64748b',
@@ -74,7 +95,51 @@ const PALETTES: Record<SkinId, Record<SkinMode, SkinTokens>> = {
   },
 }
 
-export const getSkinTokens = (skin: SkinId, mode: SkinMode): SkinTokens => PALETTES[skin][mode]
+/** 每种皮肤自己的"面板质感"：圆角、字体、卡片底色 */
+const SKIN_STYLE: Record<
+  SkinId,
+  {
+    radius: string
+    fontFamily: string
+    panel: Record<SkinMode, { panel: string; panelBorder: string; panelMuted: string }>
+  }
+> = {
+  industrial: {
+    radius: '10px',
+    fontFamily: "Inter, 'Noto Sans SC', system-ui, -apple-system, sans-serif",
+    panel: {
+      light: { panel: '#ffffff', panelBorder: '#e2e8f0', panelMuted: '#f8fafc' },
+      dark: { panel: '#162236', panelBorder: '#2f4059', panelMuted: '#0f1a2b' },
+    },
+  },
+  schematic: {
+    radius: '2px',
+    fontFamily: "'JetBrains Mono', 'Sarasa Mono SC', ui-monospace, SFMono-Regular, monospace",
+    panel: {
+      light: { panel: '#fdfefd', panelBorder: '#cfe0cf', panelMuted: '#f2f7f2' },
+      dark: { panel: '#141c15', panelBorder: '#334436', panelMuted: '#101711' },
+    },
+  },
+  paper: {
+    radius: '6px',
+    fontFamily: "Georgia, 'Songti SC', 'Noto Serif SC', serif",
+    panel: {
+      light: { panel: '#fffdf7', panelBorder: '#e2d9c3', panelMuted: '#f6f0e2' },
+      dark: { panel: '#2a2420', panelBorder: '#463f37', panelMuted: '#221e1a' },
+    },
+  },
+}
+
+export const getSkinTokens = (skin: SkinId, mode: SkinMode): SkinTokens => {
+  const palette = PALETTES[skin][mode]
+  const style = SKIN_STYLE[skin]
+  return {
+    ...palette,
+    ...style.panel[mode],
+    radius: style.radius,
+    fontFamily: style.fontFamily,
+  }
+}
 
 export function skinVars(tokens: SkinTokens): Record<string, string> {
   return {
@@ -90,5 +155,10 @@ export function skinVars(tokens: SkinTokens): Record<string, string> {
     '--pg-edge-active': tokens.edgeActive,
     '--pg-edge-conflict': tokens.edgeConflict,
     '--pg-canvas-shadow': tokens.canvasShadow,
+    '--pg-panel': tokens.panel,
+    '--pg-panel-border': tokens.panelBorder,
+    '--pg-panel-muted': tokens.panelMuted,
+    '--pg-radius': tokens.radius,
+    '--pg-font': tokens.fontFamily,
   }
 }

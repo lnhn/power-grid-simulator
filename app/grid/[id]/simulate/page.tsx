@@ -23,7 +23,7 @@ import { Toast } from '@/components/Toast'
 import { ConfirmModal } from '@/components/ConfirmModal'
 import { buildGridModels, GridSolver, voltageToColor, inferTieHandle, normalizeTieHandle, buildNodeRuntime } from '@/lib/grid'
 import type { SectionState, TieState, GridNode, GridEdge } from '@/lib/grid'
-import { diffChecks, evaluateChecks, previewTieToggle } from '@/lib/grid'
+import { CheckDebouncer, evaluateChecks, previewTieToggle } from '@/lib/grid'
 import type { GridCheck } from '@/lib/grid'
 import { useSkin } from '@/components/SkinProvider'
 
@@ -63,6 +63,16 @@ interface GridEventRow {
   targetId: string | null
   state: string
 }
+
+/** 回放帧：一次求解后的完整运行画面，只存在本次会话内存里 */
+type ReplayFrame = {
+  at: number
+  label: string
+  nodes: Node[]
+  edges: Edge[]
+  totalKw: number
+  alarmCount: number
+}
 interface OperationLog {
   id: string
   timestamp: string
@@ -96,24 +106,30 @@ export default function SimulateGridPage() {
     onConfirm: () => void
   }>({ open: false, title: '', message: '', onConfirm: () => {} })
   const [summary, setSummary] = useState<{ sections: SectionState[]; ties: TieState[]; totalKw: number; checks: GridCheck[] } | null>(null)
+
+
   const [events, setEvents] = useState<GridEventRow[]>([])
+  const [frames, setFrames] = useState<ReplayFrame[]>([])
+  const [replayIndex, setReplayIndex] = useState<number | null>(null)
   // 故障注入：仅内存生效，不改数据库；恢复即清除
   const [faultedSources, setFaultedSources] = useState<string[]>([])
   // 总负荷采样（前端内存环形缓冲，5 秒一点，最多 60 点）
   const [trend, setTrend] = useState<{ t: number; kw: number }[]>([])
-  const lastChecksRef = useRef<GridCheck[] | null>(null)
   const faultedSourcesRef = useRef<string[]>([])
+  const debouncerRef = useRef<CheckDebouncer | null>(null)
+  const latestChecksRef = useRef<GridCheck[]>([])
+  const lastSolvedRef = useRef<{ nodes: Node[]; edges: Edge[]; totalKw: number; alarmCount: number } | null>(null)
   const latestKwRef = useRef<number>(0)
   const nodesRef = useRef<Node[]>([])
   const edgesRef = useRef<Edge[]>([])
 
-  // 同步最新画布到 ref，供事件回调读取；在 effect 中写入避免渲染期变更 ref
+  // 同步最新画布到 ref，供事件回调读取；回放时暂不写回，避免"回到实时"退回历史帧
   useEffect(() => {
-    nodesRef.current = nodes
-  }, [nodes])
+    if (replayIndex === null) nodesRef.current = nodes
+  }, [nodes, replayIndex])
   useEffect(() => {
-    edgesRef.current = edges
-  }, [edges])
+    if (replayIndex === null) edgesRef.current = edges
+  }, [edges, replayIndex])
 
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -251,14 +267,27 @@ export default function SimulateGridPage() {
     }
   }
 
-  /** 母联操作预演：返回将发生的结果，供确认弹窗展示 */
   // 总负荷采样：5 秒一点，无操作时也能看出趋势；纯前端内存，不落库
   useEffect(() => {
     const timer = setInterval(() => {
+      const debouncer = debouncerRef.current
+      if (debouncer) flushEvents(debouncer.update(latestChecksRef.current, Date.now()))
       setTrend((prev) => [...prev.slice(-59), { t: Date.now(), kw: latestKwRef.current }])
     }, 5000)
     return () => clearInterval(timer)
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps -- flushEvents 只读 ref 与 gridId，重建定时器无意义
+
+  /** 事件统一出口：去抖后的差分、故障注入、操作都会走这里 */
+  const flushEvents = (batch: { severity: string; code: string; message: string; targetId: string | null; state: string; snapshot?: string }[]) => {
+    if (batch.length === 0 || isDraftPreview()) return
+    fetch(`/api/grids/${gridId}/events`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ events: batch }),
+    })
+      .then(() => fetchEvents())
+      .catch((error) => console.error('Post grid events failed:', error))
+  }
 
   const fetchEvents = async () => {
     try {
@@ -304,6 +333,7 @@ export default function SimulateGridPage() {
   }
 
   const handleSwitchToggle = (nodeId: string) => {
+    if (replayIndex !== null) return
     const node = nodesRef.current.find((n) => n.id === nodeId)
     if (!node) return
     const nextStatus = node.data.status === 'on' ? 'off' : 'on'
@@ -325,6 +355,7 @@ export default function SimulateGridPage() {
   }
 
   const handleLoadToggle = (nodeId: string) => {
+    if (replayIndex !== null) return
     const node = nodesRef.current.find((n) => n.id === nodeId)
     if (!node) return
     if (!node.data.powered) {
@@ -349,6 +380,7 @@ export default function SimulateGridPage() {
       n.id === nodeId ? { ...n, data: { ...n.data, status: nextStatus, running: nextStatus === 'running' } } : n
     )
     applyCircuitState(nextNodes, edgesRef.current)
+    pushFrame(`${node.data.label} ${nextStatus === 'running' ? '启动' : '停止'}`)
     void persistOperation(nodeId, { status: nextStatus, running: nextStatus === 'running' })
   }
 
@@ -451,26 +483,44 @@ export default function SimulateGridPage() {
     setSummary({ sections: result.sections, ties: Array.from(result.ties.values()), totalKw: result.totalKw, checks })
 
     // 首次求解只作为基线，不把"开机就存在的既有问题"刷成一堆事件
-    const previousChecks = lastChecksRef.current
-    const changed = previousChecks ? diffChecks(previousChecks, checks, JSON.stringify({ totalKw: Math.round(result.totalKw), sections: result.sections.length })) : []
-    lastChecksRef.current = checks
-    if (changed.length > 0 && !isDraftPreview()) {
-      fetch(`/api/grids/${gridId}/events`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ events: changed }),
-      })
-        .then(() => fetchEvents())
-        .catch((error) => console.error('Post grid events failed:', error))
+    latestChecksRef.current = checks
+    const debouncer = debouncerRef.current ?? (debouncerRef.current = new CheckDebouncer(3000))
+    flushEvents(debouncer.update(checks, Date.now()))
+
+    lastSolvedRef.current = {
+      nodes: solvedNodes,
+      edges: solvedEdges,
+      totalKw: result.totalKw,
+      alarmCount: checks.filter((check) => check.severity !== 'info').length,
     }
-    latestKwRef.current = result.totalKw
     setTrend((prev) => [...prev.slice(-59), { t: Date.now(), kw: result.totalKw }])
 
     return { nextNodes: solvedNodes, nextEdges: solvedEdges }
   }
 
+  /** 记一帧回放画面（上限 40 帧，只留内存） */
+  const pushFrame = (label: string) => {
+    const snapshot = lastSolvedRef.current
+    if (!snapshot) return
+    setFrames((prev) => [...prev, { at: Date.now(), label, ...snapshot }].slice(-40))
+  }
+
+  /** 拖回放轴：切到历史帧的只读画面 */
+  const enterFrame = (index: number | null) => {
+    setReplayIndex(index)
+    if (index === null) {
+      applyCircuitState(nodesRef.current, edgesRef.current)
+      return
+    }
+    const frame = frames[index]
+    if (!frame) return
+    setNodes(frame.nodes)
+    setEdges(frame.edges)
+  }
+
   /** 故障注入：只改内存中的运行状态并重解，不写数据库 */
   const toggleFault = (nodeId: string) => {
+    if (replayIndex !== null) return
     const injected = faultedSourcesRef.current.includes(nodeId)
     const next = injected
       ? faultedSourcesRef.current.filter((id) => id !== nodeId)
@@ -479,6 +529,7 @@ export default function SimulateGridPage() {
     setFaultedSources(next)
     const label = nodesRef.current.find((node) => node.id === nodeId)?.data?.label ?? nodeId
     applyCircuitState(nodesRef.current, edgesRef.current)
+    pushFrame(`${label} ${injected ? '恢复供电' : '注入失电'}`)
     setToast({ message: injected ? label + ': 已恢复供电' : label + ': 已注入失电故障', type: 'success' })
   }
 
@@ -487,7 +538,7 @@ export default function SimulateGridPage() {
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
         <div className="text-center">
           <div className="inline-block animate-spin rounded-full h-16 w-16 border-4 border-blue-500 border-t-transparent"></div>
-          <p className="mt-4 text-gray-600 font-medium">加载中...</p>
+          <p className="mt-4 pg-muted font-medium">加载中...</p>
         </div>
       </div>
     )
@@ -518,18 +569,18 @@ export default function SimulateGridPage() {
   const CHECK_CLASS: Record<string, string> = {
     danger: 'rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-700',
     warning: 'rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-700',
-    info: 'rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-[11px] text-gray-600',
+    info: 'rounded-lg border pg-border bg-gray-50 px-3 py-2 text-[11px] pg-muted',
   }
   return (
     <div className="h-screen flex flex-col" style={{ background: tokens.bg }}>
       {/* 顶部导航栏 */}
-      <nav className="bg-white border-b border-gray-200 shadow-sm">
+      <nav className="pg-panel border-b pg-border shadow-sm">
         <div className="px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
               <button
                 onClick={() => router.push('/dashboard')}
-                className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition"
+                className="flex items-center space-x-2 pg-muted hover:pg-text transition"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -537,14 +588,14 @@ export default function SimulateGridPage() {
                 <span className="font-medium">返回</span>
               </button>
               <div className="h-6 w-px bg-gray-300"></div>
-              <h1 className="text-xl font-bold text-gray-900">{grid?.name}</h1>
+              <h1 className="text-xl font-bold pg-text">{grid?.name}</h1>
               <span className="px-3 py-1 bg-gradient-to-r from-green-500 to-emerald-500 text-white text-sm font-semibold rounded-full shadow-sm">
                 ● 模拟运行
               </span>
             </div>
               <button
                 onClick={() => router.push('/settings')}
-                className="px-4 py-2 rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50"
+                className="px-4 py-2 rounded-lg font-medium border pg-border pg-text hover:bg-gray-50"
               >
                 外观
               </button>
@@ -555,7 +606,7 @@ export default function SimulateGridPage() {
                 className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-medium transition shadow-sm ${
                   showLogs
                     ? 'bg-blue-500 text-white'
-                    : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
+                    : 'pg-panel border pg-border pg-text hover:bg-gray-50'
                 }`}
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -567,6 +618,38 @@ export default function SimulateGridPage() {
           </div>
         </div>
       </nav>
+      {/* 回放：本次会话的操作帧，只存内存，不落库 */}
+      {frames.length > 0 && (
+        <div className="px-6 py-2 pg-panel border-b pg-border flex flex-wrap items-center gap-3 text-sm">
+          <span className="font-medium pg-text">会话回放</span>
+          <input
+            type="range"
+            min={0}
+            max={frames.length - 1}
+            value={replayIndex ?? frames.length - 1}
+            onChange={(event) => enterFrame(Number(event.target.value))}
+            className="flex-1 min-w-[180px] accent-blue-500"
+          />
+          <span className="pg-muted tabular-nums">
+            {replayIndex === null
+              ? '实时 · 共 ' + frames.length + ' 帧'
+              : `第 ${replayIndex + 1}/${frames.length} 帧 · ${new Date(frames[replayIndex].at).toLocaleTimeString()} · ${frames[replayIndex].label}`}
+          </span>
+          {replayIndex !== null && (
+            <>
+              <span className="text-gray-500 tabular-nums">
+                {frames[replayIndex].totalKw.toFixed(1)} kW · 告警 {frames[replayIndex].alarmCount}
+              </span>
+              <button
+                onClick={() => enterFrame(null)}
+                className="px-3 py-1 rounded-md bg-blue-500 text-white font-medium hover:bg-blue-600"
+              >
+                回到实时
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {draftMode && (
         <div className="flex items-center justify-center gap-2 bg-amber-400 px-4 py-2 text-sm font-bold text-amber-950 shadow-sm">
@@ -579,9 +662,9 @@ export default function SimulateGridPage() {
 
       <div className="flex-1 flex overflow-hidden">
         {/* 左侧状态面板 */}
-        <div className="w-72 bg-white border-r border-gray-200 overflow-y-auto">
+        <div className="w-72 pg-panel border-r pg-border overflow-y-auto">
           <div className="p-4">
-            <h2 className="text-sm font-bold text-gray-800 mb-4 flex items-center">
+            <h2 className="text-sm font-bold pg-text mb-4 flex items-center">
               <svg className="w-5 h-5 mr-2 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 00-2-2m0 0h6m-6 0a2 2 0 01-2-2m0-10h6" />
               </svg>
@@ -635,8 +718,8 @@ export default function SimulateGridPage() {
               </div>
             </div>
             {summary && summary.checks.length > 0 && (
-              <div className="mt-6 pt-6 border-t border-gray-200">
-                <h3 className="text-sm font-bold text-gray-800 mb-3">运行校验</h3>
+              <div className="mt-6 pt-6 border-t pg-border">
+                <h3 className="text-sm font-bold pg-text mb-3">运行校验</h3>
                 <div className="space-y-2">
                   {summary.checks.map((check, index) => (
                     <div key={index} className={CHECK_CLASS[check.severity] || CHECK_CLASS.info}>
@@ -648,8 +731,8 @@ export default function SimulateGridPage() {
             )}
 
             {summary && (
-              <div className="mt-6 pt-6 border-t border-gray-200">
-                <h3 className="text-sm font-bold text-gray-800 mb-1">总负荷趋势</h3>
+              <div className="mt-6 pt-6 border-t pg-border">
+                <h3 className="text-sm font-bold pg-text mb-1">总负荷趋势</h3>
                 {trend.length < 2 ? (
                   <p className="text-[11px] text-gray-500">采样中，每 5 秒记录一点</p>
                 ) : (
@@ -664,8 +747,8 @@ export default function SimulateGridPage() {
               </div>
             )}
 
-            <div className="mt-6 pt-6 border-t border-gray-200">
-              <h3 className="text-sm font-bold text-gray-800 mb-1">故障注入</h3>
+            <div className="mt-6 pt-6 border-t pg-border">
+              <h3 className="text-sm font-bold pg-text mb-1">故障注入</h3>
               <p className="text-[11px] text-gray-500 mb-2">仅影响当前画面，不写数据库。</p>
               <div className="space-y-2">
                 {nodes.filter((node) => node.type === 'powerSource').map((node) => {
@@ -674,7 +757,7 @@ export default function SimulateGridPage() {
                     <button
                       key={node.id}
                       onClick={() => toggleFault(node.id)}
-                      className={"w-full flex items-center justify-between rounded-lg border px-3 py-2 text-[11px] " + (injected ? "border-red-300 bg-red-50 text-red-700" : "border-gray-200 bg-white text-gray-700")}
+                      className={"w-full flex items-center justify-between rounded-lg border px-3 py-2 text-[11px] " + (injected ? "border-red-300 bg-red-50 text-red-700" : "pg-border pg-panel pg-text")}
                     >
                       <span className="truncate">{node.data?.label ?? node.id}</span>
                       <span className="font-semibold ml-2">{injected ? '恢复供电' : '注入失电'}</span>
@@ -687,9 +770,9 @@ export default function SimulateGridPage() {
               </div>
             </div>
 
-            <div className="mt-6 pt-6 border-t border-gray-200">
+            <div className="mt-6 pt-6 border-t pg-border">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-bold text-gray-800">运行事件</h3>
+                <h3 className="text-sm font-bold pg-text">运行事件</h3>
                 <button onClick={fetchEvents} className="text-[11px] text-blue-600 hover:text-blue-800">刷新</button>
               </div>
               {events.length === 0 ? (
@@ -717,8 +800,8 @@ export default function SimulateGridPage() {
             </div>
 
             {summary && (
-              <div className="mt-6 pt-6 border-t border-gray-200">
-                <h3 className="text-sm font-bold text-gray-800 mb-3">运行方式</h3>
+              <div className="mt-6 pt-6 border-t pg-border">
+                <h3 className="text-sm font-bold pg-text mb-3">运行方式</h3>
 
                 <div className="space-y-2">
                   {summary.ties.length === 0 ? (
@@ -728,14 +811,14 @@ export default function SimulateGridPage() {
                       const mode = TIE_MODE_LABEL[tie.mode] ?? TIE_MODE_LABEL.standby
                       const label = nodes.find((n) => n.id === tie.id)?.data?.label ?? tie.id
                       return (
-                        <div key={tie.id} className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                        <div key={tie.id} className="rounded-lg border pg-border bg-gray-50 p-3">
                           <div className="flex items-center justify-between">
-                            <span className="text-xs font-semibold text-gray-800">{label}</span>
+                            <span className="text-xs font-semibold pg-text">{label}</span>
                             <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${mode.cls}`}>
                               {mode.text}
                             </span>
                           </div>
-                          <div className="mt-2 flex items-center justify-between text-[11px] text-gray-600">
+                          <div className="mt-2 flex items-center justify-between text-[11px] pg-muted">
                             <span>
                               左 {tie.leftVoltage ? `${tie.leftVoltage}V` : '失电'} · {tie.leftSources.length} 源
                             </span>
@@ -750,14 +833,14 @@ export default function SimulateGridPage() {
                   )}
                 </div>
 
-                <h4 className="mt-4 mb-2 text-xs font-semibold text-gray-600">电气分段</h4>
+                <h4 className="mt-4 mb-2 text-xs font-semibold pg-muted">电气分段</h4>
                 <div className="space-y-2">
                   {summary.sections.map((section, index) => (
                     <div
                       key={section.id}
-                      className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2"
+                      className="flex items-center justify-between rounded-lg border pg-border px-3 py-2"
                     >
-                      <span className="text-[11px] text-gray-600">
+                      <span className="text-[11px] pg-muted">
                         第 {index + 1} 段 · {section.busIds.length} 母线 · {section.loadCount} 台 · {section.loadKw.toFixed(0)}kW
                       </span>
                       <span className={`text-[11px] font-bold ${section.energized ? 'text-emerald-600' : 'text-gray-400'}`}>
@@ -770,9 +853,9 @@ export default function SimulateGridPage() {
               </div>
             )}
 
-            <div className="mt-6 pt-6 border-t border-gray-200">
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">💡 操作指南</h3>
-              <div className="space-y-2 text-xs text-gray-600">
+            <div className="mt-6 pt-6 border-t pg-border">
+              <h3 className="text-sm font-semibold pg-text mb-3">💡 操作指南</h3>
+              <div className="space-y-2 text-xs pg-muted">
                 <div className="flex items-start space-x-2 p-2 bg-blue-50 rounded">
                   <div className="w-2 h-2 bg-blue-500 rounded-full mt-1"></div>
                   <p>点击<strong>断路器</strong>切换开关状态</p>
@@ -839,8 +922,8 @@ export default function SimulateGridPage() {
 
         {/* 右侧操作日志面板 */}
         {showLogs && (
-          <div className="w-80 bg-white border-l border-gray-200 flex flex-col shadow-xl">
-            <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-blue-500 to-blue-600">
+          <div className="w-80 pg-panel border-l pg-border flex flex-col shadow-xl">
+            <div className="p-4 border-b pg-border bg-gradient-to-r from-blue-500 to-blue-600">
               <h2 className="text-lg font-bold text-white flex items-center">
                 <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -861,7 +944,7 @@ export default function SimulateGridPage() {
                 logs.map((log) => {
                   const isStart = log.action.includes('ON') || log.action.includes('START')
                   return (
-                    <div key={log.id} className="bg-gray-50 rounded-lg p-3 border border-gray-200 hover:shadow-md transition">
+                    <div key={log.id} className="bg-gray-50 rounded-lg p-3 border pg-border hover:shadow-md transition">
                       <div className="flex items-start justify-between mb-2">
                         <span className={`px-2 py-1 rounded-md text-xs font-bold ${
                           isStart
@@ -874,7 +957,7 @@ export default function SimulateGridPage() {
                           {new Date(log.timestamp).toLocaleTimeString('zh-CN')}
                         </span>
                       </div>
-                      <p className="text-xs text-gray-600 mb-1">
+                      <p className="text-xs pg-muted mb-1">
                         <strong>节点:</strong> {log.targetId}
                       </p>
                       <p className="text-xs text-gray-500">

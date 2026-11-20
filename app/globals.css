@@ -181,3 +181,11 @@ body {
 .switch-transition {
   transition: all 0.3s ease-in-out;
 }
+
+/* 皮肤下沉用的通用类：面板/文字/描边都走 --pg-* 变量，皮肤切换时整页同步 */
+.pg-panel { background: var(--pg-panel); }
+.pg-surface { background: var(--pg-surface); }
+.pg-border { border-color: var(--pg-panel-border); }
+.pg-text { color: var(--pg-text); }
+.pg-muted { color: var(--pg-muted); }
+.pg-font { font-family: var(--pg-font); }

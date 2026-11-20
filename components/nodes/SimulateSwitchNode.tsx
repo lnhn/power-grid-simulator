@@ -1,8 +1,19 @@
+'use client'
+
 import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import type { GridNode } from '@/lib/grid'
+import { useSkin } from '@/components/SkinProvider'
+import { SymbolIcon } from './SymbolIcon'
+
+/** 语义色：闭合=绿、断开=红（运行视图沿用原有强对比），端口带电=蓝 */
+const CLOSED = '#16a34a'
+const OPEN = '#dc2626'
+const PORT_LIVE = '#2563eb'
+const PORT_DEAD = '#94a3b8'
 
 export const SimulateSwitchNode = memo(({ data, id }: NodeProps<GridNode>) => {
+  const { tokens } = useSkin()
   const isOn = data.status === 'on'
   const isPowered = data.powered
   const isTie = data.subType === 'tie'
@@ -15,14 +26,14 @@ export const SimulateSwitchNode = memo(({ data, id }: NodeProps<GridNode>) => {
   const tieMode = data.tieMode as string | undefined
   const tieBadge =
     tieMode === 'parallel'
-      ? { text: '母联 · 并列', cls: 'bg-blue-100 text-blue-700' }
+      ? { text: '母联 · 并列', bg: '#dbeafe', fg: '#1d4ed8' }
       : tieMode === 'unsafeParallel'
-        ? { text: '母联 · 危险并列', cls: 'bg-red-100 text-red-700' }
+        ? { text: '母联 · 危险并列', bg: '#fee2e2', fg: '#b91c1c' }
         : tieMode === 'sectioned'
-          ? { text: '母联 · 分段', cls: 'bg-emerald-100 text-emerald-700' }
+          ? { text: '母联 · 分段', bg: '#dcfce7', fg: '#15803d' }
           : tieMode === 'standby'
-            ? { text: '母联 · 备用', cls: 'bg-amber-100 text-amber-700' }
-            : { text: '母联', cls: 'bg-emerald-100 text-emerald-700' }
+            ? { text: '母联 · 备用', bg: '#fef3c7', fg: '#b45309' }
+            : { text: '母联', bg: '#dcfce7', fg: '#15803d' }
 
   const previewLines: string[] =
     isTie && typeof data.onPreview === 'function' ? data.onPreview(id, !isOn) : []
@@ -48,38 +59,44 @@ export const SimulateSwitchNode = memo(({ data, id }: NodeProps<GridNode>) => {
     }
   }
 
+  const handle = (powered: boolean) => ({
+    width: 14,
+    height: 14,
+    background: powered ? PORT_LIVE : PORT_DEAD,
+    border: '2px solid var(--pg-panel)',
+    pointerEvents: 'none' as const,
+  })
+
   return (
     <div
       onClick={handleClick}
-      className={`relative bg-white rounded-lg shadow-lg px-6 py-3 min-w-[240px] border-2 cursor-pointer transition-all duration-300 ${
-        isOn ? 'border-green-500 shadow-green-200' : 'border-red-500 shadow-red-200'
-      }`}
-      style={{ pointerEvents: 'all' }}
+      className="relative px-5 py-3 min-w-[240px] border-2 cursor-pointer transition-all duration-300"
+      style={{
+        background: 'var(--pg-panel)',
+        borderColor: isOn ? CLOSED : OPEN,
+        borderRadius: 'var(--pg-radius)',
+        boxShadow: tokens.canvasShadow,
+        fontFamily: 'var(--pg-font)',
+        pointerEvents: 'all',
+      }}
     >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <div className={`p-2 rounded-lg transition-all duration-300 ${isOn ? 'bg-green-100' : 'bg-red-100'}`}>
-            <svg
-              className={`w-5 h-5 ${isOn ? 'text-green-600' : 'text-red-600'}`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path strokeWidth={1.8} strokeLinecap="round" d="M4 12h7m2 0h7" />
-              <path strokeWidth={1.8} strokeLinecap="round" d={isOn ? 'M11 12l-2-2M11 12l-2 2' : 'M11 12l-3-3M11 12l-3 3'} />
-              <circle cx="4" cy="12" r="1.2" strokeWidth={1.6} />
-              <circle cx="20" cy="12" r="1.2" strokeWidth={1.6} />
-            </svg>
-          </div>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span
+            className="p-1.5"
+            style={{ background: isOn ? 'rgba(22,163,74,0.12)' : 'rgba(220,38,38,0.10)', borderRadius: 'calc(var(--pg-radius) * 0.6)' }}
+          >
+            <SymbolIcon kind="switch" on={isOn} tie={isTie} color={isOn ? CLOSED : OPEN} />
+          </span>
           <div>
-            <div className="font-semibold text-gray-900 text-sm">{data.label}</div>
-            <div className={`text-xs font-bold transition-colors ${isOn ? 'text-green-600' : 'text-red-600'}`}>
+            <div className="font-semibold text-sm" style={{ color: 'var(--pg-text)' }}>{data.label}</div>
+            <div className="text-xs font-bold" style={{ color: isOn ? CLOSED : OPEN }}>
               {isOn ? '● 闭合' : '○ 断开'}
             </div>
           </div>
         </div>
         {isTie && (
-          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${tieBadge.cls}`}>
+          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: tieBadge.bg, color: tieBadge.fg }}>
             {tieBadge.text}
           </span>
         )}
@@ -87,49 +104,15 @@ export const SimulateSwitchNode = memo(({ data, id }: NodeProps<GridNode>) => {
 
       {!isTie ? (
         <>
-          <Handle
-            type="target"
-            position={Position.Top}
-            className={`!w-4 !h-4 !border-2 !border-white transition-colors ${topPowered ? '!bg-blue-500' : '!bg-gray-400'}`}
-            style={{ top: -8, pointerEvents: 'none' }}
-          />
-          <Handle
-            type="source"
-            position={Position.Bottom}
-            className={`!w-4 !h-4 !border-2 !border-white transition-colors ${bottomPowered ? '!bg-blue-500' : '!bg-gray-400'}`}
-            style={{ bottom: -8, pointerEvents: 'none' }}
-          />
+          <Handle type="target" position={Position.Top} style={{ ...handle(topPowered), top: -8 }} />
+          <Handle type="source" position={Position.Bottom} style={{ ...handle(bottomPowered), bottom: -8 }} />
         </>
       ) : (
         <>
-          <Handle
-            id="left-target"
-            type="target"
-            position={Position.Left}
-            className={`!w-4 !h-4 !border-2 !border-white transition-colors ${leftPowered ? '!bg-blue-500' : '!bg-gray-400'}`}
-            style={{ left: -8, pointerEvents: 'none' }}
-          />
-          <Handle
-            id="left-source"
-            type="source"
-            position={Position.Left}
-            className={`!w-4 !h-4 !border-2 !border-white transition-colors ${leftPowered ? '!bg-blue-500' : '!bg-gray-400'}`}
-            style={{ left: -8, pointerEvents: 'none' }}
-          />
-          <Handle
-            id="right-target"
-            type="target"
-            position={Position.Right}
-            className={`!w-4 !h-4 !border-2 !border-white transition-colors ${rightPowered ? '!bg-blue-500' : '!bg-gray-400'}`}
-            style={{ right: -8, pointerEvents: 'none' }}
-          />
-          <Handle
-            id="right-source"
-            type="source"
-            position={Position.Right}
-            className={`!w-4 !h-4 !border-2 !border-white transition-colors ${rightPowered ? '!bg-blue-500' : '!bg-gray-400'}`}
-            style={{ right: -8, pointerEvents: 'none' }}
-          />
+          <Handle id="left-target" type="target" position={Position.Left} style={{ ...handle(leftPowered), left: -8 }} />
+          <Handle id="left-source" type="source" position={Position.Left} style={{ ...handle(leftPowered), left: -8 }} />
+          <Handle id="right-target" type="target" position={Position.Right} style={{ ...handle(rightPowered), right: -8 }} />
+          <Handle id="right-source" type="source" position={Position.Right} style={{ ...handle(rightPowered), right: -8 }} />
         </>
       )}
     </div>

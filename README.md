@@ -30,6 +30,10 @@ npx prisma generate
 npx prisma db push
 npm run seed        # 初始化账号、租户与示例电网
 npm run dev         # http://localhost:3000
+
+# 旧库体检/迁移（幂等，只加 --apply 才写库）
+npm run db:migrate-data
+npm run db:migrate-data:apply
 ```
 
 Windows 下也可用 `start.sh`（Git Bash / MSYS2）完成首次初始化。
@@ -136,7 +140,12 @@ power-grid-simulator/
 | `GridEvent` | 运行事件（告警产生/消失）：级别、代码、目标元件、快照、`tenantId` |
 | `Equipment` | 设备台账，保存电网时由节点同步生成（含子类型/功率/电压/电流） |
 
-## 已知限制（v2.8.0）
+## 已知限制（v2.9.0）
+
+- 会话回放只保留本次页面的最近 40 帧，刷新即清空；跨会话回放需要 `SimulationSample` 落库（未做）；
+- 告警去抖宽限期固定 3 秒，未做成可配置项；
+- 皮肤覆盖面板、节点卡片、字体与圆角，但导出（SVG/PDF）与打印仍走默认样式；
+- 功率仍是"汇总"口径（不含阻抗与压降），不是潮流解。
 
 仍然是**电气语义模拟器**，以下边界如实记录：
 
@@ -145,7 +154,7 @@ power-grid-simulator/
 3. **变压器为有向模型**：只按一次侧 → 二次侧 × `ratio` 传递；当前未实现反送电（二次侧向一次侧倒送）的建模，该场景不在支持范围内。
 4. 电流按 `I = P / (√3 · U · cosφ)` 估算，默认 cosφ = 0.85，不做温升与载流曲线校核。
 5. 开关载流校验只跟 `ratedCurrent` 静态比较，不考虑短时过载与保护动作时间。
-6. 没有短路计算与继保整定；告警事件已按"产生/消失"差分落库、负荷趋势为前端 5 秒采样折线，但**告警去抖/人工确认、采样历史落库与故障回放**尚未实现（M3 待做部分）。
+6. 没有短路计算与继保整定；告警已做"产生/消失"差分落库 + 3 秒去抖（瞬态抖动不刷屏），负荷趋势为前端 5 秒采样折线，会话内可滑杆回放；**跨会话回放与采样落库**仍未实现（M3 待做部分），人工确认（操作票/五防）按既定优先级排在最后。
 7. 依赖安全：v2.6.0 已升级到 Next.js 16.4.6（App Router 的 `params` 全部改为异步读取，`next lint` 改为 ESLint 9 CLI），`npm audit` 当前为 **0 漏洞**。
 8. 画布库：v2.7.0 已将 `reactflow` 11 迁移到 `@xyflow/react` 13，并升级到 React 19；旧包名与 CSS 路径不再使用。
 
@@ -191,6 +200,7 @@ docker compose exec power-grid npx tsx prisma/seed.ts   # 首次初始化账号
 ```bash
 npm test          # Vitest 5：求解器用例
 npm run lint      # ESLint 9 Flat Config 工程门禁
+npm test          # Vitest：求解器、lint、模板、去抖、矩阵回归共 65 例
 npm run build     # 依赖升级后已验证通过
 ```
 

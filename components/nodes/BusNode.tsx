@@ -1,10 +1,26 @@
+'use client'
+
 import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import type { GridNode } from '@/lib/grid'
+import { useSkin } from '@/components/SkinProvider'
+import { SymbolIcon } from './SymbolIcon'
 
+/** 母线：一块横条，皮肤决定面板质感，符号集决定母排画法 */
 export const BusNode = memo(({ data, selected }: NodeProps<GridNode>) => {
+  const { tokens, skin } = useSkin()
+
   return (
-    <div className="relative bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-lg shadow-lg px-6 py-3 min-w-[240px] border-2 border-indigo-400">
+    <div
+      className="relative px-5 py-3 min-w-[240px] border-2 transition-shadow"
+      style={{
+        background: 'var(--pg-panel)',
+        borderColor: selected ? tokens.accent : 'var(--pg-panel-border)',
+        borderRadius: 'var(--pg-radius)',
+        boxShadow: selected ? `0 0 0 3px ${tokens.accentSoft}` : tokens.canvasShadow,
+        fontFamily: 'var(--pg-font)',
+      }}
+    >
       {selected && (
         <button
           type="button"
@@ -12,57 +28,37 @@ export const BusNode = memo(({ data, selected }: NodeProps<GridNode>) => {
             event.stopPropagation()
             data?.onDelete?.()
           }}
-          className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-white text-gray-700 border border-gray-200 shadow hover:bg-gray-50"
+          className="absolute -top-2 -right-2 w-6 h-6 rounded-full shadow text-sm leading-none"
+          style={{ background: 'var(--pg-panel)', border: '1px solid var(--pg-panel-border)', color: 'var(--pg-muted)' }}
           aria-label="删除节点"
         >
           ×
         </button>
       )}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <div className="bg-white/20 p-2 rounded-lg">
-            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
+
+      <div className="flex items-center gap-3">
+        <span
+          className="p-1.5"
+          style={{ background: tokens.accentSoft, borderRadius: 'calc(var(--pg-radius) * 0.6)', color: tokens.accent }}
+        >
+          <SymbolIcon kind="bus" color={tokens.accent} />
+        </span>
+        <div className="min-w-0">
+          <div className="font-bold text-sm truncate" style={{ color: 'var(--pg-text)' }}>
+            {data.label}
           </div>
-          <div>
-            <div className="font-bold text-white text-sm">{data.label}</div>
-          </div>
+          {skin === 'schematic' && (
+            <div className="text-[10px] tracking-widest" style={{ color: 'var(--pg-muted)' }}>
+              BUSBAR
+            </div>
+          )}
         </div>
       </div>
-      
-      {/* 顶部输入 */}
-      <Handle
-        type="target"
-        position={Position.Top}
-        id="top-target"
-        className="!bg-yellow-400 !w-4 !h-4 !border-2 !border-white"
-        style={{ top: -8 }}
-      />
-      {/* 底部输出 */}
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        id="bottom-source"
-        className="!bg-yellow-400 !w-4 !h-4 !border-2 !border-white"
-        style={{ bottom: -8 }}
-      />
-      {/* 左侧输出 */}
-      <Handle
-        type="source"
-        position={Position.Left}
-        id="left-source"
-        className="!bg-yellow-400 !w-4 !h-4 !border-2 !border-white"
-        style={{ left: -8 }}
-      />
-      {/* 右侧输出 */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="right-source"
-        className="!bg-yellow-400 !w-4 !h-4 !border-2 !border-white"
-        style={{ right: -8 }}
-      />
+
+      <Handle type="target" position={Position.Top} id="top-target" style={{ width: 14, height: 14, background: tokens.accent, border: '2px solid var(--pg-panel)', top: -8 }} />
+      <Handle type="source" position={Position.Bottom} id="bottom-source" style={{ width: 14, height: 14, background: tokens.accent, border: '2px solid var(--pg-panel)', bottom: -8 }} />
+      <Handle type="source" position={Position.Left} id="left-source" style={{ width: 14, height: 14, background: tokens.accent, border: '2px solid var(--pg-panel)', left: -8 }} />
+      <Handle type="source" position={Position.Right} id="right-source" style={{ width: 14, height: 14, background: tokens.accent, border: '2px solid var(--pg-panel)', right: -8 }} />
     </div>
   )
 })

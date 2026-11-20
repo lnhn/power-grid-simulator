@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ConfirmModal } from '@/components/ConfirmModal'
 import { Toast } from '@/components/Toast'
+import { TEMPLATE_LIST, type GridTemplateId } from '@/lib/grid'
 
 interface PowerGrid {
   id: string
@@ -97,7 +98,7 @@ export default function DashboardPage() {
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
           <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent"></div>
-          <p className="mt-4 text-gray-600">加载中...</p>
+          <p className="mt-4 pg-muted">加载中...</p>
         </div>
       </div>
     )
@@ -108,7 +109,7 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen flex bg-gray-50">
       {/* 左侧导航栏 - 仅 Dashboard 使用 */}
-      <aside className="w-56 bg-white border-r border-gray-200 flex flex-col flex-shrink-0">
+      <aside className="w-56 pg-panel border-r pg-border flex flex-col flex-shrink-0">
         <div className="p-4 border-b border-gray-100">
           <Link href="/dashboard" className="flex items-center space-x-3">
             <div className="flex items-center justify-center w-10 h-10 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-lg">
@@ -117,7 +118,7 @@ export default function DashboardPage() {
               </svg>
             </div>
             <div>
-              <h1 className="text-base font-bold text-gray-900">电网模拟系统</h1>
+              <h1 className="text-base font-bold pg-text">电网模拟系统</h1>
               <p className="text-xs text-gray-500">化工厂电网管理</p>
             </div>
           </Link>
@@ -134,7 +135,7 @@ export default function DashboardPage() {
           </Link>
           <Link
             href="/equipment"
-            className="flex items-center space-x-3 px-3 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition"
+            className="flex items-center space-x-3 px-3 py-2.5 rounded-lg pg-muted hover:bg-gray-100 hover:pg-text transition"
           >
             <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
@@ -143,7 +144,7 @@ export default function DashboardPage() {
           </Link>
           <Link
             href="/logs"
-            className="flex items-center space-x-3 px-3 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition"
+            className="flex items-center space-x-3 px-3 py-2.5 rounded-lg pg-muted hover:bg-gray-100 hover:pg-text transition"
           >
             <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -152,13 +153,13 @@ export default function DashboardPage() {
           </Link>
         </nav>
         <div className="p-3 border-t border-gray-100 space-y-2">
-          <div className="px-3 py-2 text-sm text-gray-700">
-            <p className="font-medium text-gray-900">{session?.user?.name}</p>
+          <div className="px-3 py-2 text-sm pg-text">
+            <p className="font-medium pg-text">{session?.user?.name}</p>
             <p className="text-xs text-gray-500">{isEngineer ? '工程师' : '操作员'}</p>
           </div>
           <button
             onClick={handleLogout}
-            className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition text-sm"
+            className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg pg-muted hover:bg-gray-100 hover:pg-text transition text-sm"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
@@ -174,8 +175,8 @@ export default function DashboardPage() {
         {/* 页面标题和操作按钮 */}
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h2 className="text-3xl font-bold text-gray-900">电网列表</h2>
-            <p className="text-gray-600 mt-1">选择一个电网进行{isEngineer ? '编辑或' : ''}模拟操作</p>
+            <h2 className="text-3xl font-bold pg-text">电网列表</h2>
+            <p className="pg-muted mt-1">选择一个电网进行{isEngineer ? '编辑或' : ''}模拟操作</p>
           </div>
           
           {isEngineer && (
@@ -207,7 +208,7 @@ export default function DashboardPage() {
             {grids.map((grid) => (
               <div
                 key={grid.id}
-                className="bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-lg transition overflow-hidden flex flex-col h-full relative"
+                className="pg-panel rounded-xl shadow-sm border pg-border hover:shadow-lg transition overflow-hidden flex flex-col h-full relative"
               >
                 {isEngineer && (
                   <button
@@ -222,8 +223,8 @@ export default function DashboardPage() {
                   </button>
                 )}
                 <div className="p-6 flex-1 flex flex-col">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">{grid.name}</h3>
-                  <p className="text-sm text-gray-600 mb-4 line-clamp-2 flex-1 min-h-[40px]">
+                  <h3 className="text-lg font-semibold pg-text mb-2">{grid.name}</h3>
+                  <p className="text-sm pg-muted mb-4 line-clamp-2 flex-1 min-h-[40px]">
                     {grid.description || '暂无描述'}
                   </p>
                   <p className="text-xs text-gray-400 mb-4">
@@ -241,7 +242,7 @@ export default function DashboardPage() {
                       <>
                         <Link
                           href={`/grid/${grid.id}/edit`}
-                          className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition text-center"
+                          className="flex-1 px-4 py-2 bg-gray-100 pg-text text-sm font-medium rounded-lg hover:bg-gray-200 transition text-center"
                         >
                           编辑
                         </Link>
@@ -291,6 +292,7 @@ export default function DashboardPage() {
 function CreateGridModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [template, setTemplate] = useState<GridTemplateId>('blank')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -303,7 +305,7 @@ function CreateGridModal({ onClose, onSuccess }: { onClose: () => void; onSucces
       const res = await fetch('/api/grids', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, description }),
+        body: JSON.stringify({ name, description, template }),
       })
 
       const data = await res.json().catch(() => ({}))
@@ -322,8 +324,8 @@ function CreateGridModal({ onClose, onSuccess }: { onClose: () => void; onSucces
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
-        <h3 className="text-xl font-bold text-gray-900 mb-4">创建新电网</h3>
+      <div className="pg-panel rounded-2xl shadow-xl max-w-md w-full p-6">
+        <h3 className="text-xl font-bold pg-text mb-4">创建新电网</h3>
         
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
@@ -332,37 +334,58 @@ function CreateGridModal({ onClose, onSuccess }: { onClose: () => void; onSucces
             </div>
           )}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium pg-text mb-2">
               电网名称
             </label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+              className="w-full px-4 py-2 border pg-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
               placeholder="例如: 车间A电网"
               required
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium pg-text mb-2">
               描述 (可选)
             </label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none"
+              className="w-full px-4 py-2 border pg-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none"
               rows={3}
               placeholder="简要描述这个电网的用途"
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium pg-text mb-2">起始模板</label>
+            <div className="grid grid-cols-2 gap-2">
+              {TEMPLATE_LIST.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setTemplate(item.id)}
+                  className={`text-left px-3 py-2 rounded-lg border transition ${
+                    template === item.id
+                      ? 'border-blue-500 bg-blue-50 text-blue-700'
+                      : 'pg-border pg-text hover:bg-gray-50'
+                  }`}
+                >
+                  <span className="block text-sm font-medium">{item.name}</span>
+                  <span className="block text-xs text-gray-500 mt-0.5">{item.description}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="flex space-x-3 pt-4">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition"
+              className="flex-1 px-4 py-2 border pg-border pg-text rounded-lg hover:bg-gray-50 transition"
             >
               取消
             </button>

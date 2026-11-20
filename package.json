@@ -1,6 +1,6 @@
 {
   "name": "power-grid-simulator",
-  "version": "2.8.0",
+  "version": "2.9.0",
   "private": true,
   "engines": {
     "node": ">=20.9.0"
@@ -12,7 +12,9 @@
     "lint": "eslint .",
     "test": "vitest run",
     "postinstall": "prisma generate",
-    "seed": "tsx prisma/seed.ts"
+    "seed": "tsx prisma/seed.ts",
+    "db:migrate-data": "tsx scripts/migrate-data.ts",
+    "db:migrate-data:apply": "tsx scripts/migrate-data.ts --apply"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

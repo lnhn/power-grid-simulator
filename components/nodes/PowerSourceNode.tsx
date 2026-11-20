@@ -1,10 +1,25 @@
+'use client'
+
 import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import type { GridNode } from '@/lib/grid'
+import { useSkin } from '@/components/SkinProvider'
+import { SymbolIcon } from './SymbolIcon'
 
 export const PowerSourceNode = memo(({ data, selected }: NodeProps<GridNode>) => {
+  const { tokens } = useSkin()
+
   return (
-    <div className="relative bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg shadow-lg px-6 py-3 min-w-[240px] border-2 border-blue-400">
+    <div
+      className="relative px-5 py-3 min-w-[240px] border-2"
+      style={{
+        background: 'var(--pg-panel)',
+        borderColor: selected ? tokens.accent : 'var(--pg-panel-border)',
+        borderRadius: 'var(--pg-radius)',
+        boxShadow: selected ? `0 0 0 3px ${tokens.accentSoft}` : tokens.canvasShadow,
+        fontFamily: 'var(--pg-font)',
+      }}
+    >
       {selected && (
         <button
           type="button"
@@ -12,32 +27,30 @@ export const PowerSourceNode = memo(({ data, selected }: NodeProps<GridNode>) =>
             event.stopPropagation()
             data?.onDelete?.()
           }}
-          className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-white text-gray-700 border border-gray-200 shadow hover:bg-gray-50"
+          className="absolute -top-2 -right-2 w-6 h-6 rounded-full shadow text-sm leading-none"
+          style={{ background: 'var(--pg-panel)', border: '1px solid var(--pg-panel-border)', color: 'var(--pg-muted)' }}
           aria-label="删除节点"
         >
           ×
         </button>
       )}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <div className="bg-white/20 p-2 rounded-lg">
-            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-          </div>
-          <div>
-            <div className="font-bold text-white text-sm">{data.label}</div>
-          </div>
+
+      <div className="flex items-center gap-3">
+        <span
+          className="p-1.5"
+          style={{ background: tokens.accentSoft, borderRadius: 'calc(var(--pg-radius) * 0.6)', color: tokens.accent }}
+        >
+          <SymbolIcon kind="source" color={tokens.accent} />
+        </span>
+        <div>
+          <div className="font-bold text-sm" style={{ color: 'var(--pg-text)' }}>{data.label}</div>
+          {'voltage' in data && data.voltage != null && (
+            <div className="text-xs" style={{ color: 'var(--pg-muted)' }}>{data.voltage} V 电源</div>
+          )}
         </div>
       </div>
-      
-      {/* 只有底部输出 */}
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        className="!bg-yellow-400 !w-4 !h-4 !border-2 !border-white"
-        style={{ bottom: -8 }}
-      />
+
+      <Handle type="source" position={Position.Bottom} style={{ width: 14, height: 14, background: tokens.accent, border: '2px solid var(--pg-panel)', bottom: -8 }} />
     </div>
   )
 })

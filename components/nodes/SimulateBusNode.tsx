@@ -1,70 +1,60 @@
+'use client'
+
 import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import type { GridNode } from '@/lib/grid'
+import { useSkin } from '@/components/SkinProvider'
+import { SymbolIcon } from './SymbolIcon'
+
+/** 语义色：带电=绿、失电=灰，皮肤不改这两组颜色 */
+const LIVE = '#16a34a'
+const DEAD = '#94a3b8'
 
 export const SimulateBusNode = memo(({ data }: NodeProps<GridNode>) => {
+  const { tokens } = useSkin()
   const isPowered = data.powered
   const portStatus = data.portStatus || {}
   const topPowered = portStatus.top ?? isPowered
   const bottomPowered = portStatus.bottom ?? isPowered
   const leftPowered = portStatus.left ?? isPowered
   const rightPowered = portStatus.right ?? isPowered
-  
+
   return (
-    <div className={`bg-gradient-to-br rounded-lg shadow-lg px-6 py-3 min-w-[240px] border-2 transition-all ${
-      isPowered 
-        ? 'from-indigo-500 to-indigo-600 border-indigo-400 shadow-indigo-300/50' 
-        : 'from-gray-400 to-gray-500 border-gray-300'
-    }`}>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <div className="bg-white/20 p-2 rounded-lg">
-            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-          </div>
-          <div>
-            <div className="font-bold text-white text-sm">{data.label}</div>
-          </div>
+    <div
+      className="px-5 py-3 min-w-[240px] border-2"
+      style={{
+        background: 'var(--pg-panel)',
+        borderColor: isPowered ? LIVE : 'var(--pg-panel-border)',
+        borderRadius: 'var(--pg-radius)',
+        boxShadow: isPowered ? '0 0 0 3px rgba(22,163,74,0.12)' : tokens.canvasShadow,
+        fontFamily: 'var(--pg-font)',
+      }}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span
+            className="p-1.5"
+            style={{ background: isPowered ? 'rgba(22,163,74,0.14)' : 'var(--pg-panel-muted)', borderRadius: 'calc(var(--pg-radius) * 0.6)' }}
+          >
+            <SymbolIcon kind="bus" color={isPowered ? LIVE : DEAD} />
+          </span>
+          <div className="font-bold text-sm" style={{ color: 'var(--pg-text)' }}>{data.label}</div>
         </div>
-        <div className={`px-2 py-1 rounded-full text-xs font-bold ${
-          isPowered ? 'bg-green-400/30 text-white' : 'bg-gray-400/30 text-gray-200'
-        }`}>
-          <div className="flex items-center space-x-1">
-            <div className={`w-1.5 h-1.5 rounded-full ${isPowered ? 'bg-green-300 animate-pulse' : 'bg-gray-300'}`}></div>
-            <span>{isPowered ? (data.liveVoltage ? `带电 · ${data.liveVoltage}V` : '带电') : '停止'}</span>
-          </div>
+        <div
+          className="px-2 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap"
+          style={{
+            background: isPowered ? 'rgba(22,163,74,0.14)' : 'var(--pg-panel-muted)',
+            color: isPowered ? LIVE : 'var(--pg-muted)',
+          }}
+        >
+          {isPowered ? (data.liveVoltage ? `带电 · ${data.liveVoltage}V` : '带电') : '停止'}
         </div>
       </div>
-      
-      <Handle
-        type="target"
-        position={Position.Top}
-        id="top-target"
-        className={`!w-4 !h-4 !border-2 !border-white ${topPowered ? '!bg-yellow-400' : '!bg-gray-400'}`}
-        style={{ top: -8 }}
-      />
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        id="bottom-source"
-        className={`!w-4 !h-4 !border-2 !border-white ${bottomPowered ? '!bg-yellow-400' : '!bg-gray-400'}`}
-        style={{ bottom: -8 }}
-      />
-      <Handle
-        type="source"
-        position={Position.Left}
-        id="left-source"
-        className={`!w-4 !h-4 !border-2 !border-white ${leftPowered ? '!bg-yellow-400' : '!bg-gray-400'}`}
-        style={{ left: -8 }}
-      />
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="right-source"
-        className={`!w-4 !h-4 !border-2 !border-white ${rightPowered ? '!bg-yellow-400' : '!bg-gray-400'}`}
-        style={{ right: -8 }}
-      />
+
+      <Handle type="target" position={Position.Top} id="top-target" style={{ width: 14, height: 14, background: topPowered ? LIVE : DEAD, border: '2px solid var(--pg-panel)', top: -8 }} />
+      <Handle type="source" position={Position.Bottom} id="bottom-source" style={{ width: 14, height: 14, background: bottomPowered ? LIVE : DEAD, border: '2px solid var(--pg-panel)', bottom: -8 }} />
+      <Handle type="source" position={Position.Left} id="left-source" style={{ width: 14, height: 14, background: leftPowered ? LIVE : DEAD, border: '2px solid var(--pg-panel)', left: -8 }} />
+      <Handle type="source" position={Position.Right} id="right-source" style={{ width: 14, height: 14, background: rightPowered ? LIVE : DEAD, border: '2px solid var(--pg-panel)', right: -8 }} />
     </div>
   )
 })

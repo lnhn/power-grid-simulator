@@ -1,5 +1,34 @@
 # 更新日志
 
+## v2.9.0 - 告警去抖、会话回放、拓扑模板与数据迁移
+
+这一版把"能看"补成"能复盘、能开箱建图"，并把皮肤下沉到面板与元件本体。
+
+### 监控（M3 收尾）
+- `lib/grid/engine/debounce.ts`：`CheckDebouncer` 给校验清单加 3 秒宽限期——瞬态抖动不报，持续存在问题才 raised；问题消失立刻 cleared
+- 模拟页接入去抖：每次求解与 5 秒采样都推进去抖器，事件统一从 `flushEvents` 出口 POST，草稿预览不写库
+- 会话回放：每次操作/故障注入记一帧（上限 40 帧，含节点、连线、总功率、告警数），顶部滑杆可回看历史画面，回放中操作被禁用，可一键回到实时
+- 说明：回放帧只存在本次会话内存，刷新即清空；跨会话历史回放仍需 `SimulationSample` 落库（见 ROADMAP）
+
+### 建图（M5 收尾）
+- `lib/grid/templates.ts`：四套模板（空白、单母单线、单母分段+母联、变压器进线），内部跑一键整理保证不叠图
+- `POST /api/grids` 接受 `template` 白名单参数，创建即带拓扑
+- 新建电网弹窗增加模板选择器（2×2 卡片），默认空白
+
+### 数据（M6 收尾）
+- `scripts/migrate-data.ts`：幂等迁移/体检脚本，剥掉入库节点与连线里的运行态字段、回填租户、检出重复节点/连线与悬空连线
+- `npm run db:migrate-data` 只体检，`npm run db:migrate-data:apply` 才写库；已对 `prisma/dev.db` 执行一次（剥除 13 条连线的 `flow` 残留，备份 `prisma/dev.db.bak-m6`）
+
+### 皮肤下沉（M4 收尾）
+- `SkinTokens` 增加 `panel / panelBorder / panelMuted / radius / fontFamily`，输出 `--pg-panel*`、`--pg-radius`、`--pg-font`
+- 编辑态与模拟态的全部节点卡片改用面板变量：皮肤换底色、圆角、字体，语义色（带电绿 / 失电灰 / 冲突红 / 断开红）固定不变
+- 新增 `components/nodes/SymbolIcon.tsx`：IEC / 国标 / 简化 三套元件符号（电源、母排、开关与母联、变压器、负荷），设置页可切换，存 `pg.symbol`
+- 模拟页与仪表盘的 `bg-white / text-gray-*` 改为 `pg-panel / pg-text / pg-muted` 工具类，跟随皮肤
+
+### 验证
+- `tsc --noEmit` 0 错误、`eslint .` 0 error（仅编辑页历史遗留的未使用函数 warning）、`vitest` 65/65、`next build` 通过
+- 生产服务冒烟：`/login`、`/settings`、`/dashboard`、`/grid/{id}/simulate`、`/grid/{id}/edit` 均 200，未登录 `/api/grids` 401
+
 
 ## v2.8.0 - 拓扑 lint、一键整理与部署收尾
 
