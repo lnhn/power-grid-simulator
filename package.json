@@ -1,6 +1,6 @@
 {
   "name": "power-grid-simulator",
-  "version": "2.9.5",
+  "version": "2.10.0",
   "private": true,
   "engines": {
     "node": ">=20.9.0"

@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import { SKIN_LIST, SYMBOL_LIST, getSkinTokens } from '@/lib/skins/tokens'
+import { getSkinSpec } from '@/lib/skins/spec'
 import { useSkin } from '@/components/SkinProvider'
 
 export default function SettingsPage() {
@@ -53,6 +54,7 @@ export default function SettingsPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {SKIN_LIST.map((item) => {
               const tokens = getSkinTokens(item.id, mode)
+              const spec = getSkinSpec(item.id)
               const active = skin === item.id
               return (
                 <button
@@ -81,11 +83,51 @@ export default function SettingsPage() {
                       <span key={color} className="w-6 h-6" style={{ background: color, borderRadius: 'calc(var(--pg-radius) * 0.4)' }} />
                     ))}
                   </div>
+                  {/* 形态预览：直接用这套皮肤自己的形状参数画一个小元件，不用切换全局皮肤 */}
+                  <div className="mb-3 p-2" style={{ background: tokens.bg, borderRadius: 'calc(' + tokens.radius + ' * 0.6)' }}>
+                    <div
+                      className="flex items-center"
+                      style={{
+                        gap: spec.shape.nodeStyle === 'terminal' ? 6 : 10,
+                        background: tokens.panel,
+                        border: spec.shape.borderWidth + 'px solid ' + tokens.border,
+                        borderRadius: 'calc(' + tokens.radius + ' * ' + spec.shape.radiusScale + ')',
+                        padding: Math.min(spec.shape.paddingY, 10) + 'px ' + Math.min(spec.shape.paddingX, 12) + 'px',
+                        boxShadow: spec.shape.shadow === 'soft' ? tokens.canvasShadow : 'none',
+                        fontFamily: tokens.fontFamily,
+                      }}
+                    >
+                      {spec.shape.nodeStyle === 'terminal' ? (
+                        <span style={{ width: 6, height: 6, borderRadius: 9999, background: tokens.accent, flexShrink: 0 }} />
+                      ) : (
+                        <span
+                          style={{
+                            width: 22,
+                            height: 22,
+                            flexShrink: 0,
+                            background: spec.shape.iconFrame === 'bare' ? 'transparent' : tokens.accentSoft,
+                            borderRadius: spec.shape.iconFrame === 'circle' ? 9999 : 'calc(' + tokens.radius + ' * 0.5)',
+                            border: '1px solid ' + tokens.border,
+                          }}
+                        />
+                      )}
+                      <div className="min-w-0">
+                        {spec.shape.showCaption && (
+                          <div style={{ fontSize: 9, letterSpacing: '0.12em', color: tokens.muted }}>BUSBAR</div>
+                        )}
+                        <div style={{ fontSize: Math.min(spec.shape.titleSize, 13), fontWeight: 700, color: tokens.text }}>
+                          母线段
+                        </div>
+                        <div style={{ fontSize: 10, color: tokens.muted }}>380 V</div>
+                      </div>
+                    </div>
+                  </div>
+
                   <p className="text-xs leading-relaxed" style={{ color: 'var(--pg-muted)' }}>
                     {item.description}
                   </p>
-                  <p className="text-[10px] mt-2" style={{ color: 'var(--pg-muted)', fontFamily: tokens.fontFamily }}>
-                    字体 · 圆角 {tokens.radius}
+                  <p className="text-[10px] mt-2" style={{ color: 'var(--pg-muted)' }}>
+                    形态 {spec.shape.nodeStyle === 'card' ? '整卡' : spec.shape.nodeStyle === 'compact' ? '紧凑条' : '端子式'} · 连线 {spec.wire.width}px · 3D {spec.view3d.material}
                   </p>
                 </button>
               )

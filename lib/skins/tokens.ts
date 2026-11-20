@@ -6,7 +6,7 @@
  * 语义色影响"是什么意思"，两者可以自由组合。
  */
 
-export type SkinId = 'industrial' | 'schematic' | 'paper'
+export type SkinId = 'industrial' | 'schematic' | 'paper' | 'terminal'
 export type SkinMode = 'light' | 'dark'
 export type SymbolSet = 'iec' | 'gb' | 'simple'
 
@@ -40,6 +40,7 @@ export const SKIN_LIST: SkinMeta[] = [
   { id: 'industrial', name: '工业', description: '冷灰钢构、深蓝强调，适合控制室大屏' },
   { id: 'schematic', name: '图纸', description: '白纸墨线、细网格，接近电气原理图' },
   { id: 'paper', name: '纸感', description: '暖白纸面、赭色强调，适合打印与交底' },
+  { id: 'terminal', name: '端子', description: '端子式窄条，只留状态灯与名称，现场小屏信息密度最高' },
 ]
 
 export type SymbolMeta = { id: SymbolSet; name: string; description: string }
@@ -76,6 +77,20 @@ const PALETTES: Record<SkinId, Record<SkinMode, Palette>> = {
       bg: '#0f1411', surface: '#151d16', border: '#2b3a2d', text: '#dceadc', muted: '#93a894',
       accent: '#4ade80', accentSoft: '#12351f', grid: '#223124',
       edgeIdle: '#4b5f4e', edgeActive: '#4ade80', edgeConflict: '#f87171',
+      canvasShadow: 'none',
+    },
+  },
+  terminal: {
+    light: {
+      bg: '#f6f8fb', surface: '#ffffff', border: '#d5dde8', text: '#0f172a', muted: '#6b7686',
+      accent: '#0284c7', accentSoft: '#e0f2fe', grid: '#e2e8f0',
+      edgeIdle: '#a7b4c4', edgeActive: '#0284c7', edgeConflict: '#dc2626',
+      canvasShadow: '0 1px 2px rgba(15,23,42,0.06)',
+    },
+    dark: {
+      bg: '#0a0f18', surface: '#111a26', border: '#22303f', text: '#e6edf5', muted: '#8fa0b3',
+      accent: '#22d3ee', accentSoft: '#083344', grid: '#16212d',
+      edgeIdle: '#3d4c5e', edgeActive: '#22d3ee', edgeConflict: '#f87171',
       canvasShadow: 'none',
     },
   },
@@ -118,6 +133,14 @@ const SKIN_STYLE: Record<
     panel: {
       light: { panel: '#fdfefd', panelBorder: '#cfe0cf', panelMuted: '#f2f7f2' },
       dark: { panel: '#1a241c', panelBorder: '#405240', panelMuted: '#121a13' },
+    },
+  },
+  terminal: {
+    radius: '4px',
+    fontFamily: "Inter, 'Noto Sans SC', system-ui, -apple-system, sans-serif",
+    panel: {
+      light: { panel: '#ffffff', panelBorder: '#d5dde8', panelMuted: '#f1f5f9' },
+      dark: { panel: '#131d2a', panelBorder: '#2a3a4c', panelMuted: '#0f1722' },
     },
   },
   paper: {

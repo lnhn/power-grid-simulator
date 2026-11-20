@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { getSkinTokens, skinVars } from '@/lib/skins/tokens'
+import { getSkinSpec, type SkinSpec } from '@/lib/skins/spec'
 import type { SkinId, SkinMode, SkinTokens, SymbolSet } from '@/lib/skins/tokens'
 
 const SKIN_KEY = 'pg.skin'
@@ -13,6 +14,8 @@ type SkinContextValue = {
   mode: SkinMode
   symbolSet: SymbolSet
   tokens: SkinTokens
+  /** 皮肤规格：形态、连线、3D 材质，与配色同一处读取 */
+  spec: SkinSpec
   setSkin: (skin: SkinId) => void
   setMode: (mode: SkinMode) => void
   setSymbolSet: (symbolSet: SymbolSet) => void
@@ -20,8 +23,10 @@ type SkinContextValue = {
 
 const SkinContext = createContext<SkinContextValue | null>(null)
 
+const SKIN_IDS: SkinId[] = ['industrial', 'schematic', 'paper', 'terminal']
+
 export const isSkinId = (value: string | null): value is SkinId =>
-  value === 'industrial' || value === 'schematic' || value === 'paper'
+  value !== null && (SKIN_IDS as string[]).includes(value)
 
 export const isSkinMode = (value: string | null): value is SkinMode => value === 'light' || value === 'dark'
 
@@ -63,6 +68,7 @@ export function SkinProvider({ children }: { children: React.ReactNode }) {
       mode,
       symbolSet,
       tokens,
+      spec: getSkinSpec(skin),
       setSkin: (next) => {
         setSkinState(next)
         window.localStorage.setItem(SKIN_KEY, next)
