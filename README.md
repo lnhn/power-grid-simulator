@@ -2,20 +2,20 @@
 
 面向小型工厂（车间/装置区）的单线图构建、通断模拟与设备台账管理工具。
 
-当前版本：**v2.6.0**（电气语义 + 运行校验 + 多租户隔离 + 皮肤体系 + Next 16 安全升级，见 [docs/ROADMAP.md](docs/ROADMAP.md)）
+当前版本：**v2.7.0**（电气语义 + 运行校验 + 多租户隔离 + 皮肤体系 + M3 监控演练核心 + Next 16 / React 19 现代化，见 [docs/ROADMAP.md](docs/ROADMAP.md)）
 
 ## 它解决什么问题
 
 1. **构建**：用拖拽方式画出一张工厂单线图（进线 -> 母线 -> 馈线 -> 设备），并维护设备台账。
 2. **模拟**：开合断路器、启停设备，实时计算哪一段带电、负荷由哪一路供电。
-3. **追溯**：每一次操作都记录操作人、时间、对象，支持按电网查询。
+3. **追溯**：每一次操作都记录操作人、时间、对象；告警类事件按产生/消失差分留痕，支持按电网查询。
 
 > 定位说明：当前是**电气语义模拟器**（带电/失电 + 分段 + 功率汇总 + 操作预演），不是潮流计算程序。阻抗、电压降与短路计算明确不在范围内，详见路线图。
 
 ## 技术栈
 
-- Next.js 16.4.x（App Router，Turbopack 默认）+ React 18 + TypeScript
-- ReactFlow 11（画布与连线）
+- Next.js 16.4.x（App Router，Turbopack 默认）+ React 19 + TypeScript
+- XYFlow（@xyflow/react 13，画布与连线）
 - Tailwind CSS 3
 - Prisma 5 + SQLite
 - NextAuth 4（Credentials + JWT，4.24.15+）
@@ -133,9 +133,10 @@ power-grid-simulator/
 | `User` | `username` / `password`(bcrypt) / `role`(ENGINEER\|OPERATOR) / `tenantId` |
 | `PowerGrid` | `name` / `nodes` / `edges`（ReactFlow JSON 字符串）/ `tenantId` |
 | `OperationLog` | 操作人、电网、动作、目标元件、时间、详情 |
+| `GridEvent` | 运行事件（告警产生/消失）：级别、代码、目标元件、快照、`tenantId` |
 | `Equipment` | 设备台账，保存电网时由节点同步生成（含子类型/功率/电压/电流） |
 
-## 已知限制（v2.5.0）
+## 已知限制（v2.7.0）
 
 仍然是**电气语义模拟器**，以下边界如实记录：
 
@@ -144,9 +145,9 @@ power-grid-simulator/
 3. **变压器为有向模型**：只按一次侧 → 二次侧 × `ratio` 传递；当前未实现反送电（二次侧向一次侧倒送）的建模，该场景不在支持范围内。
 4. 电流按 `I = P / (√3 · U · cosφ)` 估算，默认 cosφ = 0.85，不做温升与载流曲线校核。
 5. 开关载流校验只跟 `ratedCurrent` 静态比较，不考虑短时过载与保护动作时间。
-6. 没有短路计算、继保整定、告警持久化、趋势与回放。
+6. 没有短路计算与继保整定；告警事件已按"产生/消失"差分落库、负荷趋势为前端 5 秒采样折线，但**告警去抖/人工确认、采样历史落库与故障回放**尚未实现（M3 待做部分）。
 7. 依赖安全：v2.6.0 已升级到 Next.js 16.4.6（App Router 的 `params` 全部改为异步读取，`next lint` 改为 ESLint 9 CLI），`npm audit` 当前为 **0 漏洞**。
-8. React 版本：Next 16 仍可运行 React 18，但已标记弃用并将在 Next 17 移除；ReactFlow 11 生态迁移到 React 19 需要单独安排，本轮未做。
+8. 画布库：v2.7.0 已将 `reactflow` 11 迁移到 `@xyflow/react` 13，并升级到 React 19；旧包名与 CSS 路径不再使用。
 
 已修复的历史问题（v2.3 → v2.4 → v2.5）：
 
@@ -156,7 +157,8 @@ power-grid-simulator/
 - 双电缆并联、母联合环均按电气节点判定，不再只看单一连线；
 - 变压器降压后并列不再误报电压冲突；
 - v2.5.0 修复功率守恒与引擎边界问题，并恢复 ESLint 门禁；
-- v2.6.0 完成 Next 16 安全升级，异步 `params`、Flat Config ESLint 与跨租户校验均已回归验证。
+- v2.6.0 完成 Next 16 安全升级，异步 `params`、Flat Config ESLint 与跨租户校验均已回归验证；
+- v2.7.0 完成 React 19 + XYFlow 13 迁移，画布渲染、带电状态与操作确认链路已用无头浏览器回归；同期落地 M3 核心：运行事件差分落库、电源失电故障注入（仅内存）与负荷趋势采样。
 
 ## 开发
 

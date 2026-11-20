@@ -1,5 +1,31 @@
 # 更新日志
 
+## v2.7.0 - React 19 / XYFlow 13 迁移与 M3 监控演练核心
+
+消除 Next 16 对 React 18 的弃用告警，完成画布库与 React 生态的现代化升级，并落地 M3 监控演练的核心能力。
+
+### M3 监控与演练（核心已落地）
+- 新增 `GridEvent` 表与 `/api/grids/[id]/events`（GET/POST，租户过滤、字段白名单、单次 50 条上限）
+- `lib/grid/engine/events.ts`：对校验清单做差分，同一问题只在"产生 / 消失"各记一次，避免重复刷屏
+- 模拟页：首次求解作基线，之后仅记录变化；电源失电故障注入（仅内存、不写库）；总负荷 5 秒采样折线
+- 测试数 39 → 45
+- 仍待做：告警去抖与人工确认、采样历史落库与故障回放（见 ROADMAP M3）
+
+### 依赖升级
+- React / React DOM 18 → 19.3.1，`@types/react` / `@types/react-dom` → 19.3.0
+- `reactflow` 11 → `@xyflow/react` 13，CSS 路径同步切换为 `@xyflow/react/dist/style.css`
+
+### 破坏性适配
+- 所有画布组件导入改为 `@xyflow/react`；`ReactFlow` 从默认导入改为命名导入
+- 新增 `GridNode` / `GridEdge` / `GridNodeData` 共享类型，`useNodesState` / `NodeProps` 统一带泛型，避免 v13 的 data 类型收紧报错
+- `ReactFlowInstance.project` → `screenToFlowPosition`
+- `OnNodesChange` 参数由数组改为 `NodeChangeset`，历史记录判断改用 `Array.from(changes)`
+- `edge` 数据补充索引签名；右键菜单事件兼容原生 `MouseEvent | React.MouseEvent`
+
+### 回归验证
+- `npx tsc --noEmit`、`npm run lint`（0 error）、`npm test`（45/45）、`npm run build`、`npm audit`（0 漏洞）全部通过
+- 无头浏览器验证：编辑页 14 节点 / 13 边 / 29 端子正常渲染，模拟页带电状态与功率汇总正确，点击开关的操作确认弹窗（含预演信息）正常触发，控制台零错误
+
 ## v2.6.0 - Next.js 16 安全升级
 
 清理上一轮审计残留的唯一 critical 依赖告警，完成框架 major 升级与回归验证。
@@ -18,7 +44,6 @@
 - `npx tsc --noEmit`、`npm run lint`（0 error）、`npm test`（39/39）、`npm run build` 全部通过
 - 生产服务冒烟：登录/会话、电网 CRUD 读、日志读取、动态页面均正常；跨租户访问电网/日志/设备接口仍返回 404
 
-> 已知遗留：Next 16 标记 React 18 为弃用（Next 17 将移除）；ReactFlow 11 迁移到 React 19 生态需单独安排。
 
 ## v2.5.0 - 租户隔离与工程门禁
 
